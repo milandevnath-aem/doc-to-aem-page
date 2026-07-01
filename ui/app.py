@@ -34,7 +34,8 @@ def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
     if not docx_file.filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are accepted.")
 
-    dest = UPLOADS_DIR / f"{uuid.uuid4()}-{docx_file.filename}"
+    safe_filename = Path(docx_file.filename).name
+    dest = UPLOADS_DIR / f"{uuid.uuid4()}-{safe_filename}"
     with dest.open("wb") as f:
         shutil.copyfileobj(docx_file.file, f)
 
