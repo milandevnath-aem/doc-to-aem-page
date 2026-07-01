@@ -13,3 +13,4 @@ build/
 output_sample.json
 ui/runs.db
 ui/uploads/
+/uploads/
