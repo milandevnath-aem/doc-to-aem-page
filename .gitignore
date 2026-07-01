@@ -11,3 +11,5 @@ dist/
 build/
 .env
 output_sample.json
+ui/runs.db
+ui/uploads/
