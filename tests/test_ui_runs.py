@@ -1,6 +1,5 @@
 """Tests for ui/runs.py -- SQLite-backed run history."""
 
-import time
 from ui.runs import get_run, list_runs, save_run
 from ui.service import RunResult
 
@@ -47,7 +46,6 @@ def test_list_runs_orders_newest_first(tmp_path):
     r2 = RunResult(status="failed", filename="second.docx", issues=[], ncm=None)
 
     save_run(r1, db_path=db_path)
-    time.sleep(0.01)  # Ensure different timestamps
     save_run(r2, db_path=db_path)
 
     records = list_runs(db_path=db_path)

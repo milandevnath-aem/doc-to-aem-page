@@ -87,6 +87,6 @@ def list_runs(db_path: Path | None = None) -> list[RunRecord]:
     db_path = _resolve_db_path(db_path)
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT id, filename, created_at, status, issues_json, ncm_json FROM runs ORDER BY created_at DESC"
+            "SELECT id, filename, created_at, status, issues_json, ncm_json FROM runs ORDER BY created_at DESC, rowid DESC"
         ).fetchall()
     return [_row_to_record(row) for row in rows]
