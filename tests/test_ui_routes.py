@@ -5,7 +5,9 @@ import io
 from fastapi.testclient import TestClient
 
 from ui import app as app_module
+from ui import runs as runs_module
 from ui.app import app
+from ui.service import RunResult
 
 
 def test_home_page_renders_upload_form():
@@ -88,3 +90,55 @@ def test_run_route_prevents_path_traversal(tmp_path, monkeypatch):
     parent = tmp_path.parent
     parent_files = list(parent.glob("evil.docx"))
     assert len(parent_files) == 0, f"Path traversal vulnerability: evil.docx found in {parent}"
+
+
+def test_result_page_shows_status_and_issues():
+    result = RunResult(
+        status="failed",
+        filename="broken.docx",
+        issues=[{
+            "severity": "error", "code": "missing-required-metadata",
+            "message": "Metadata table is missing required field(s): ['description'].",
+            "paragraph_index": 0, "snippet": "[metadata]", "context": "",
+        }],
+        ncm=None,
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "missing-required-metadata" in response.text
+    assert "FAILED" in response.text
+
+
+def test_result_page_renders_rte_html_preview():
+    result = RunResult(
+        status="passed",
+        filename="clean.docx",
+        issues=[],
+        ncm={
+            "page": {"properties": {"title": "T"}},
+            "blocks": [{
+                "name": "hero-banner", "variant": None,
+                "fields": {"title": "Hero", "description": "<p>Hello <strong>world</strong></p>"},
+                "items": [], "table": None,
+            }],
+        },
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "<strong>world</strong>" in response.text  # rendered raw HTML, not escaped
+
+
+def test_result_page_404_for_unknown_run():
+    client = TestClient(app_module.app)
+
+    response = client.get("/runs/does-not-exist")
+
+    assert response.status_code == 404

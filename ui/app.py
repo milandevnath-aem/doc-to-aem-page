@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ui.runs import save_run
+from ui.runs import get_run, save_run
 from ui.service import run_pipeline
 
 BASE_DIR = Path(__file__).parent
@@ -43,3 +43,11 @@ def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
     run_id = save_run(result)
 
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
+
+
+@app.get("/runs/{run_id}")
+def show_run(request: Request, run_id: str):
+    record = get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return templates.TemplateResponse(request, "result.html", {"run": record})

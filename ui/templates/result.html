@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Run Result: {{ run.filename }}{% endblock %}
+{% block content %}
+<h1>{{ run.filename }}</h1>
+<p class="status-{{ run.status }}">Status: {{ run.status | upper }}</p>
+<p>Run at: {{ run.created_at }}</p>
+
+<h2>Validation Issues</h2>
+{% if run.issues %}
+<table>
+    <tr><th>Severity</th><th>Code</th><th>Location</th><th>Message</th></tr>
+    {% for issue in run.issues %}
+    <tr class="severity-{{ issue.severity }}">
+        <td>{{ issue.severity }}</td>
+        <td>{{ issue.code }}</td>
+        <td>body element #{{ issue.paragraph_index }}{% if issue.context %} (in {{ issue.context }}){% endif %}</td>
+        <td>{{ issue.message }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No issues found.</p>
+{% endif %}
+
+{% if run.ncm %}
+<h2>Parsed Content (NCM)</h2>
+<details open>
+    <summary>Page Properties</summary>
+    <pre>{{ run.ncm.page.properties | tojson(indent=2) }}</pre>
+</details>
+{% for block in run.ncm.blocks %}
+<details>
+    <summary>{{ block.name }}{% if block.variant %} ({{ block.variant }}){% endif %}</summary>
+    <h3>Fields</h3>
+    {% for key, value in block.fields.items() %}
+    <p><strong>{{ key }}</strong>:
+    {% if key in ["description", "body"] %}
+    <div class="rte-preview">{{ value | safe }}</div>
+    {% else %}
+    {{ value }}
+    {% endif %}
+    </p>
+    {% endfor %}
+    {% for item in block['items'] %}
+    <h4>Card: {{ item.id }}</h4>
+    {% for key, value in item.fields.items() %}
+    <p><strong>{{ key }}</strong>:
+    {% if key in ["description", "body"] %}
+    <div class="rte-preview">{{ value | safe }}</div>
+    {% else %}
+    {{ value }}
+    {% endif %}
+    </p>
+    {% endfor %}
+    {% endfor %}
+</details>
+{% endfor %}
+{% else %}
+<p>Parsing was not performed (validation errors blocked it).</p>
+{% endif %}
+{% endblock %}
