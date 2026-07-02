@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ui.runs import get_run, save_run
+from ui.runs import get_run, list_runs, save_run
 from ui.service import run_pipeline
 
 BASE_DIR = Path(__file__).parent
@@ -51,3 +51,9 @@ def show_run(request: Request, run_id: str):
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return templates.TemplateResponse(request, "result.html", {"run": record})
+
+
+@app.get("/history")
+def history(request: Request):
+    records = list_runs()
+    return templates.TemplateResponse(request, "history.html", {"runs": records})

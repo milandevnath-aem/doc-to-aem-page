@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Run History{% endblock %}
+{% block content %}
+<h1>Run History</h1>
+{% if runs %}
+<table>
+    <tr><th>Filename</th><th>Status</th><th>Errors</th><th>Warnings</th><th>Run At</th></tr>
+    {% for run in runs %}
+    <tr>
+        <td><a href="/runs/{{ run.id }}">{{ run.filename }}</a></td>
+        <td class="status-{{ run.status }}">{{ run.status | upper }}</td>
+        <td>{{ run.issues | selectattr("severity", "equalto", "error") | list | length }}</td>
+        <td>{{ run.issues | selectattr("severity", "equalto", "warning") | list | length }}</td>
+        <td>{{ run.created_at }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No runs yet.</p>
+{% endif %}
+{% endblock %}

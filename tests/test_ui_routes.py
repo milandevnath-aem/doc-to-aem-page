@@ -142,3 +142,26 @@ def test_result_page_404_for_unknown_run():
     response = client.get("/runs/does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_history_page_lists_past_runs():
+    runs_module.save_run(RunResult(status="passed", filename="a.docx", issues=[], ncm=None))
+    runs_module.save_run(RunResult(status="failed", filename="b.docx", issues=[{
+        "severity": "error", "code": "x", "message": "m", "paragraph_index": 0, "snippet": "", "context": "",
+    }], ncm=None))
+
+    client = TestClient(app_module.app)
+    response = client.get("/history")
+
+    assert response.status_code == 200
+    assert "a.docx" in response.text
+    assert "b.docx" in response.text
+
+
+def test_history_page_empty_state():
+    client = TestClient(app_module.app)
+
+    response = client.get("/history")
+
+    assert response.status_code == 200
+    assert "No runs yet" in response.text
