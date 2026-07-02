@@ -45,6 +45,46 @@ def test_run_route_uploads_and_redirects_to_result(tmp_path, monkeypatch):
     assert response.headers["location"].startswith("/runs/")
 
 
+def test_full_upload_result_history_flow(tmp_path, monkeypatch):
+    """End-to-end: upload a docx, follow the redirect to the result page,
+    confirm parsed content renders, then confirm the run shows up on /history.
+    """
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+
+    import docx as docx_lib
+    document = docx_lib.Document()
+    document.add_paragraph("[metadata]")
+    table = document.add_table(rows=3, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "Property", "Value"
+    table.cell(1, 0).text, table.cell(1, 1).text = "title", "Test Page"
+    table.cell(2, 0).text, table.cell(2, 1).text = "description", "A test page"
+    buf = io.BytesIO()
+    document.save(buf)
+    buf.seek(0)
+
+    client = TestClient(app_module.app)
+    response = client.post(
+        "/run",
+        files={"docx_file": ("e2e-flow.docx", buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/runs/")
+
+    result_response = client.get(location)
+
+    assert result_response.status_code == 200
+    assert "e2e-flow.docx" in result_response.text
+    assert "Test Page" in result_response.text
+
+    history_response = client.get("/history")
+
+    assert history_response.status_code == 200
+    assert "e2e-flow.docx" in history_response.text
+
+
 def test_run_route_rejects_non_docx_file(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
     client = TestClient(app_module.app)

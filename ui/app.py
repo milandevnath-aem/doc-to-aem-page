@@ -31,7 +31,7 @@ def home(request: Request):
 
 @app.post("/run")
 def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
-    if not docx_file.filename.lower().endswith(".docx"):
+    if not (docx_file.filename or "").lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are accepted.")
 
     safe_filename = Path(docx_file.filename).name
