@@ -176,6 +176,32 @@ def test_result_page_renders_rte_html_preview():
     assert "<strong>world</strong>" in response.text  # rendered raw HTML, not escaped
 
 
+def test_result_page_shows_full_ncm_json():
+    result = RunResult(
+        status="passed",
+        filename="clean.docx",
+        issues=[],
+        ncm={
+            "page": {"properties": {"title": "T"}},
+            "blocks": [{
+                "name": "hero-banner", "variant": None,
+                "fields": {"title": "Hero", "description": "<p>Hello</p>"},
+                "items": [], "table": None,
+            }],
+        },
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    # the raw master JSON (used for content-to-AEM mapping) must be present
+    # in full, not just the field-by-field breakdown above it
+    assert '"name": "hero-banner"' in response.text
+    assert '"description": "\\u003cp\\u003eHello\\u003c/p\\u003e"' in response.text
+
+
 def test_result_page_404_for_unknown_run():
     client = TestClient(app_module.app)
 

@@ -24,6 +24,10 @@
 
 {% if run.ncm %}
 <h2>Parsed Content (NCM)</h2>
+<details>
+    <summary>Full NCM JSON (used for AEM component mapping)</summary>
+    <pre>{{ run.ncm | tojson(indent=2) }}</pre>
+</details>
 <details open>
     <summary>Page Properties</summary>
     <pre>{{ run.ncm.page.properties | tojson(indent=2) }}</pre>

@@ -102,9 +102,19 @@ def _span_html(text: str, marks: dict) -> str:
     return html
 
 
+def _table_to_html(headers: list[str], rows: list[list[str]]) -> str:
+    parts = ["<table>"]
+    if headers:
+        parts.append("<tr>" + "".join(f"<th>{_escape_html(h)}</th>" for h in headers) + "</tr>")
+    for row in rows:
+        parts.append("<tr>" + "".join(f"<td>{_escape_html(c)}</td>" for c in row) + "</tr>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
 def _blocks_to_html(blocks: list[dict]) -> str:
-    """Serialize accumulated RTE blocks (paragraphs / bullet items) to HTML,
-    matching what an AEM Core Text (RTE) component stores in its `text`
+    """Serialize accumulated RTE blocks (paragraphs / bullet items / tables) to
+    HTML, matching what an AEM Core Text (RTE) component stores in its `text`
     property. Consecutive bullet blocks are grouped into one <ul>."""
     html_parts = []
     i = 0
@@ -116,6 +126,9 @@ def _blocks_to_html(blocks: list[dict]) -> str:
                 items.append("<li>" + "".join(_span_html(t, m) for t, m in blocks[i]["spans"]) + "</li>")
                 i += 1
             html_parts.append("<ul>" + "".join(items) + "</ul>")
+        elif block["kind"] == "table":
+            html_parts.append(_table_to_html(block["headers"], block["rows"]))
+            i += 1
         else:
             text_html = "".join(_span_html(t, m) for t, m in block["spans"])
             if text_html:
@@ -229,6 +242,13 @@ class _DslParser:
                         self.page_properties[row[0]] = row[1]
             return
         headers, *data_rows = rows if rows else ([], [])
+        if self._active_field in RTE_FIELDS:
+            # a table appearing under an RTE field key is authored content for
+            # that field (not AEM's Table component) -- fold it into the RTE
+            # HTML instead of the component-level "table" attribute.
+            blocks = self._target_fields().setdefault(self._active_field, [])
+            blocks.append({"kind": "table", "headers": headers, "rows": data_rows})
+            return
         self._component["table"] = {"headers": headers, "rows": data_rows}
 
     def handle_paragraph(self, paragraph: Paragraph):
