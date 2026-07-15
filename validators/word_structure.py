@@ -18,7 +18,7 @@ from parser.word.dsl_parser import CARD_RE, COMPONENT_RE, MARKER_RE, _DslParser,
 
 # ponytail: hardcoded allow-list for now. Move to config/mappings/*.yaml once
 # the mapping layer exists (Sprint 3) so it's one source of truth instead of two.
-KNOWN_COMPONENTS = {"hero-banner", "cards-with-full-width", "featurecards", "cardandrte"}
+KNOWN_COMPONENTS = {"hero-banner", "cards-with-full-width", "featurecards", "cardandrte", "teasercomponent"}
 REQUIRED_METADATA = {"title", "description"}
 
 

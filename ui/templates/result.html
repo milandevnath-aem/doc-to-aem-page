@@ -46,10 +46,15 @@
     </p>
     {% endfor %}
     {% for item in block['items'] %}
-    <h4>Card: {{ item.id }}</h4>
+    <h4>Card: {{ item.id if item.id else loop.index }}</h4>
     {% for key, value in item.fields.items() %}
     <p><strong>{{ key }}</strong>:
-    {% if key in ["description", "body"] %}
+    {% if key == "image" %}
+    {% if value.path and '/static/' in value.path %}
+    <img class="asset-thumb" src="/static/{{ value.path.split('/static/', 1)[1] }}" alt="{{ value.name }}" style="max-height: 80px; vertical-align: middle;">
+    {% endif %}
+    {{ value.name }} ({{ value.source }})
+    {% elif key in ["description", "body"] %}
     <div class="rte-preview">{{ value | safe }}</div>
     {% else %}
     {{ value }}

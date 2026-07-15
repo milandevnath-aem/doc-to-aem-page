@@ -23,6 +23,9 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
+# extracted (pasted) images land here, per run, so the result page can serve them
+ASSETS_DIR = BASE_DIR / "static" / "assets"
+
 
 @app.get("/")
 def home(request: Request):
@@ -35,11 +38,12 @@ def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
         raise HTTPException(status_code=400, detail="Only .docx files are accepted.")
 
     safe_filename = Path(docx_file.filename).name
-    dest = UPLOADS_DIR / f"{uuid.uuid4()}-{safe_filename}"
+    upload_id = uuid.uuid4()
+    dest = UPLOADS_DIR / f"{upload_id}-{safe_filename}"
     with dest.open("wb") as f:
         shutil.copyfileobj(docx_file.file, f)
 
-    result = run_pipeline(str(dest), force=(force == "true"))
+    result = run_pipeline(str(dest), force=(force == "true"), assets_dir=str(ASSETS_DIR / str(upload_id)))
     run_id = save_run(result)
 
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)

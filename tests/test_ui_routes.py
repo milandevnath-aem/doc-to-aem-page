@@ -202,6 +202,85 @@ def test_result_page_shows_full_ncm_json():
     assert '"description": "\\u003cp\\u003eHello\\u003c/p\\u003e"' in response.text
 
 
+def test_result_page_renders_items_with_image_thumbnail():
+    result = RunResult(
+        status="passed",
+        filename="v2.docx",
+        issues=[],
+        ncm={
+            "page": {"properties": {"title": "T"}},
+            "blocks": [{
+                "name": "featurecards", "variant": None,
+                "fields": {"title": "Benefits"},
+                "items": [{
+                    "id": None, "implicit": True,
+                    "fields": {
+                        "title": "Financial Protection",
+                        "description": "<p>Card body</p>",
+                        "image": {"source": "embedded", "name": "image-1.png",
+                                  "path": "ui/static/assets/run-x/image-1.png"},
+                    },
+                    "headings": [],
+                }],
+                "table": None,
+            }],
+        },
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Financial Protection" in response.text
+    assert "<p>Card body</p>" in response.text
+    assert '<img class="asset-thumb" src="/static/assets/run-x/image-1.png"' in response.text
+
+
+def test_run_route_extracts_embedded_images_to_assets(tmp_path, monkeypatch):
+    import base64
+
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(app_module, "ASSETS_DIR", tmp_path / "assets")
+    (tmp_path / "uploads").mkdir()
+
+    png_1px = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    img_file = tmp_path / "pic.png"
+    img_file.write_bytes(png_1px)
+
+    import docx as docx_lib
+    document = docx_lib.Document()
+    document.add_paragraph("[metadata]")
+    table = document.add_table(rows=3, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "Property", "Value"
+    table.cell(1, 0).text, table.cell(1, 1).text = "title", "Test Page"
+    table.cell(2, 0).text, table.cell(2, 1).text = "description", "A test page"
+    document.add_paragraph("[component: featurecards]")
+    document.add_paragraph("Cards Title")
+    document.add_picture(str(img_file))
+    document.add_paragraph("Pasted Card")
+    buf = io.BytesIO()
+    document.save(buf)
+    buf.seek(0)
+
+    client = TestClient(app_module.app)
+    response = client.post(
+        "/run",
+        files={"docx_file": ("with-image.docx", buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    extracted = list((tmp_path / "assets").rglob("image-1.png"))
+    assert len(extracted) == 1
+
+    result_response = client.get(response.headers["location"])
+    assert "Pasted Card" in result_response.text
+    assert "image-1.png" in result_response.text
+
+
 def test_result_page_404_for_unknown_run():
     client = TestClient(app_module.app)
 

@@ -44,6 +44,11 @@ COMPONENT_RE = re.compile(r"^\[component:\s*([\w-]+)(?:\|\|([\w-]+))?\]$", re.I)
 CARD_RE = re.compile(r"^\[card:\s*([\w-]+)\]$", re.I)
 MARKER_RE = re.compile(r"^\[([\w -]+)\]$")
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]{0,40}):-?\s*(.*)$")
+IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|svg|gif|webp)$", re.I)
+
+_BLIP_QN = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_EMBED_QN = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+_WRITABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
 
 # ponytail: allow-list of observed DSL keys, not a general "any colon-terminated
 # phrase is a key" rule -- plain prose (e.g. "Visit Us: Walk into...") collides
@@ -138,7 +143,7 @@ def _blocks_to_html(blocks: list[dict]) -> str:
 
 
 class _DslParser:
-    def __init__(self):
+    def __init__(self, assets_dir: str | None = None):
         self.page_properties: dict[str, str] = {}
         self.blocks: list[dict] = []
         self._in_metadata = False
@@ -146,6 +151,8 @@ class _DslParser:
         self._item: dict | None = None
         self._active_field: str | None = None
         self._current_idx = -1  # body-element index of the line being processed; used by validators/word_structure.py
+        self._assets_dir = Path(assets_dir) if assets_dir else None
+        self._image_count = 0
 
     def _target_fields(self) -> dict:
         return self._item["fields"] if self._item is not None else self._component["fields"]
@@ -168,9 +175,17 @@ class _DslParser:
     def _start_item(self, item_id: str):
         if self._component is None:
             return
-        self._item = {"id": item_id, "fields": {}, "headings": []}
+        self._item = {"id": item_id, "implicit": False, "fields": {}, "headings": []}
         self._component["items"].append(self._item)
         self._active_field = None
+
+    def _start_implicit_item(self) -> dict:
+        """v2 lenient authoring: items are delimited by icon lines, pasted
+        images, or bold labels instead of explicit [card:] markers."""
+        self._item = {"id": None, "implicit": True, "fields": {}, "headings": []}
+        self._component["items"].append(self._item)
+        self._active_field = None
+        return self._item
 
     def handle_marker_line(self, line: str) -> bool:
         m = COMPONENT_RE.match(line)
@@ -197,17 +212,31 @@ class _DslParser:
         key, value = m.group(1).strip().lower(), m.group(2).strip()
         if key not in ALLOWED_KEYS or self._component is None:
             return False
+        if key == "icon" and IMAGE_EXT_RE.search(value) and (self._item is None or self._item["implicit"]):
+            # v2 lenient: an icon line at component level (or inside an
+            # implicit item) starts a new card item. Explicit [card:] items
+            # keep the strict behavior below.
+            item = self._start_implicit_item()
+            item["fields"]["image"] = {"source": "reference", "name": value, "path": None}
+            return True
         fields = self._target_fields()
         if key in RTE_FIELDS:
             # inline value on the key line itself (rare in practice) carries no marks
             fields[key] = [{"kind": "para", "spans": [(value, {})]}] if value else []
+            self._active_field = key
         else:
             fields[key] = value
-        self._active_field = key
+            # inline value completes a scalar field; a bare "key:" keeps the
+            # field active so the next line can fill it
+            self._active_field = None if value else key
         return True
 
     def handle_bullet_line(self, text: str, spans: list[tuple[str, dict]]):
-        if self._component is None or self._active_field is None:
+        if self._component is None:
+            return
+        if self._active_field is None:
+            # v2 lenient: bullets under unkeyed content belong to the implicit description
+            self._target_fields().setdefault("description", []).append({"kind": "bullet", "spans": spans})
             return
         fields = self._target_fields()
         if self._active_field in RTE_FIELDS:
@@ -218,7 +247,10 @@ class _DslParser:
             items.append(text)
 
     def handle_plain_line(self, text: str, spans: list[tuple[str, dict]]):
-        if self._component is None or self._active_field is None:
+        if self._component is None:
+            return
+        if self._active_field is None:
+            self._handle_implicit_line(text, spans)
             return
         fields = self._target_fields()
         if self._active_field in RTE_FIELDS:
@@ -227,6 +259,21 @@ class _DslParser:
         else:
             existing = fields.get(self._active_field, "")
             fields[self._active_field] = f"{existing} {text}".strip() if existing else text
+
+    def _handle_implicit_line(self, text: str, spans: list[tuple[str, dict]]):
+        """v2 lenient mapping for unkeyed content (previously dropped): the
+        first line becomes the title, a fully-bold line after a title starts a
+        new item, everything else accumulates as description."""
+        fields = self._target_fields()
+        if "title" not in fields:
+            fields["title"] = text
+            return
+        is_bold = all(m.get("bold") for t, m in spans if t.strip()) and any(t.strip() for t, _ in spans)
+        if is_bold:
+            item = self._start_implicit_item()
+            item["fields"]["title"] = text
+            return
+        fields.setdefault("description", []).append({"kind": "para", "spans": spans})
 
     def handle_heading(self, level: int, text: str):
         target = self._item if self._item is not None else self._component
@@ -251,7 +298,35 @@ class _DslParser:
             return
         self._component["table"] = {"headers": headers, "rows": data_rows}
 
+    def handle_image(self, part):
+        """A pasted (embedded) image: extract it and start a new implicit item,
+        mirroring what an `icon: name.ext` line does in v2 authoring."""
+        if self._component is None:
+            return
+        self._image_count += 1
+        ext = Path(str(part.partname)).suffix.lower()
+        name = f"image-{self._image_count}{ext}"
+        path = None
+        if self._assets_dir is not None and ext in _WRITABLE_IMAGE_EXTS:
+            self._assets_dir.mkdir(parents=True, exist_ok=True)
+            target = self._assets_dir / name
+            target.write_bytes(part.blob)
+            path = target.as_posix()
+        image = {"source": "embedded", "name": name, "path": path}
+        if self._item is not None and self._item["implicit"] and "title" not in self._item["fields"]:
+            existing = self._item["fields"].get("image")
+            if existing is not None and existing["source"] == "reference":
+                # same card carries both `icon: name.ext` and a pasted image -- pasted wins
+                self._item["fields"]["image"] = image
+                return
+        item = self._start_implicit_item()
+        item["fields"]["image"] = image
+
     def handle_paragraph(self, paragraph: Paragraph):
+        for blip in paragraph._p.findall(f".//{_BLIP_QN}"):
+            rid = blip.get(_EMBED_QN)
+            if rid:
+                self.handle_image(paragraph.part.related_parts[rid])
         style_name = paragraph.style.name if paragraph.style else "Normal"
         is_bullet = _has_numbering(paragraph)
         for line, spans in _paragraph_lines(paragraph):
@@ -304,9 +379,9 @@ def walk_document(document: Document, parser: "_DslParser") -> "_DslParser":
     return parser
 
 
-def parse_docx(path: str) -> dict:
+def parse_docx(path: str, assets_dir: str | None = None) -> dict:
     document = Document(path)
-    parser = walk_document(document, _DslParser())
+    parser = walk_document(document, _DslParser(assets_dir))
     return parser.to_dict(str(Path(path)))
 
 

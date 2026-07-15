@@ -45,9 +45,14 @@ Component block gains `items` alongside existing `fields`:
   "fields": {"title": "Benefits of Buying the Right Insurance Policy"},
   "items": [
     {
-      "title": "Financial Protection",
-      "description": "<p>Insurance helps manage unexpected expenses...</p>",
-      "image": {"source": "reference", "name": "location1.png", "path": null}
+      "id": null,
+      "implicit": true,
+      "fields": {
+        "title": "Financial Protection",
+        "description": "<p>Insurance helps manage unexpected expenses...</p>",
+        "image": {"source": "reference", "name": "location1.png", "path": null}
+      },
+      "headings": []
     }
   ],
   "table": null

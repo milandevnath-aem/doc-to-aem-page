@@ -23,7 +23,7 @@ class RunResult:
     ncm: dict | None
 
 
-def run_pipeline(docx_path: str, force: bool = False) -> RunResult:
+def run_pipeline(docx_path: str, force: bool = False, assets_dir: str | None = None) -> RunResult:
     filename = Path(docx_path).name
 
     try:
@@ -37,6 +37,6 @@ def run_pipeline(docx_path: str, force: bool = False) -> RunResult:
 
     ncm = None
     if not has_errors or force:
-        ncm = parse_docx(docx_path)
+        ncm = parse_docx(docx_path, assets_dir=assets_dir)
 
     return RunResult(status=status, filename=filename, issues=[dataclasses.asdict(i) for i in issues], ncm=ncm)
