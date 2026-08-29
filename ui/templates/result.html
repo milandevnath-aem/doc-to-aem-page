@@ -29,20 +29,20 @@
 <h2>Parsed Content (NCM)</h2>
 <details>
     <summary>Full NCM JSON (used for AEM component mapping)
-        <button type="button" class="copy-btn" data-copy='{{ run.ncm | tojson }}' title="Copy this section's JSON">📋 Copy</button>
+        <button type="button" class="copy-btn" data-copy='{{ run.ncm | html_json }}' title="Copy this section's JSON">📋 Copy</button>
     </summary>
-    <pre>{{ run.ncm | tojson(indent=2) }}</pre>
+    <pre>{{ run.ncm | html_json(indent=2) }}</pre>
 </details>
 <details open>
     <summary>Page Properties
-        <button type="button" class="copy-btn" data-copy='{{ run.ncm.page.properties | tojson }}' title="Copy this section's JSON">📋 Copy</button>
+        <button type="button" class="copy-btn" data-copy='{{ run.ncm.page.properties | html_json }}' title="Copy this section's JSON">📋 Copy</button>
     </summary>
-    <pre>{{ run.ncm.page.properties | tojson(indent=2) }}</pre>
+    <pre>{{ run.ncm.page.properties | html_json(indent=2) }}</pre>
 </details>
 {% for block in run.ncm.blocks %}
 <details>
     <summary>{{ block.name }}{% if block.variant %} ({{ block.variant }}){% endif %}
-        <button type="button" class="copy-btn" data-copy='{{ block | tojson }}' title="Copy this section's JSON">📋 Copy</button>
+        <button type="button" class="copy-btn" data-copy='{{ block | html_json }}' title="Copy this section's JSON">📋 Copy</button>
     </summary>
     <h3>Fields</h3>
     {% for key, value in block.fields.items() %}

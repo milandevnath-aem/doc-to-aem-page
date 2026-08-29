@@ -2,6 +2,7 @@
 ui/service.py and ui/runs.py. No pipeline logic lives here.
 """
 
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -19,6 +20,20 @@ BASE_DIR = Path(__file__).parent
 app = FastAPI(title="Pipeline Operator UI")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+def _html_json(value, indent: int | None = None) -> str:
+    """Serialize `value` to JSON keeping `<` and `>` as real characters --
+    unlike Jinja's built-in `tojson`, which escapes them to \\u003c/\\u003e
+    for safe embedding inside <script> blocks. HTML autoescape in the
+    template already covers the same safety inside <pre> and attributes,
+    so this produces a JSON dump whose displayed and clipboard-copied
+    form contains readable `<p>`, `<h2>`, `<table>`, etc.
+    """
+    return json.dumps(value, indent=indent, ensure_ascii=False)
+
+
+templates.env.filters["html_json"] = _html_json
 
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)

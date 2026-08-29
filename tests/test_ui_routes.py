@@ -231,10 +231,15 @@ def test_result_page_shows_full_ncm_json():
     response = client.get(f"/runs/{run_id}")
 
     assert response.status_code == 200
-    # the raw master JSON (used for content-to-AEM mapping) must be present
-    # in full, not just the field-by-field breakdown above it
-    assert '"name": "hero-banner"' in response.text
-    assert '"description": "\\u003cp\\u003eHello\\u003c/p\\u003e"' in response.text
+    # The raw master JSON is dumped into a <pre> which HTML-autoescapes every
+    # `"`, `<`, `>` -- so we assert on the HTML-source form. Once the browser
+    # renders the page the reader sees the normal JSON with real `<p>` tags.
+    text = response.text
+    assert "&#34;name&#34;: &#34;hero-banner&#34;" in text
+    assert "&lt;p&gt;Hello&lt;/p&gt;" in text
+    # crucially: no more unicode escapes for HTML brackets (Jinja `tojson`
+    # would have produced those; the `html_json` filter avoids them)
+    assert "\\u003c" not in text
 
 
 def test_result_page_renders_items_with_image_thumbnail():
@@ -337,16 +342,20 @@ def test_result_page_has_copy_buttons_per_section():
     response = client.get(f"/runs/{run_id}")
 
     text = response.text
+    import html as html_mod
+    import json as json_mod
+    import re
+
     # 3 copy buttons: Full NCM, Page Properties, one per block
     assert text.count('class="copy-btn"') == 3
-    # each carries the section's JSON as data-copy. tojson is safe for
-    # <script> not attributes -- single-quoted attribute + tojson's '
-    # escape for apostrophes keeps the payload intact
-    assert "data-copy='" in text
-    # the block payload must survive intact (double-quoted JSON keys visible).
-    # Jinja's tojson sorts keys alphabetically so 'fields' comes first.
-    assert 'data-copy=\'{"fields":' in text
-    assert '"name": "faq"' in text
+    # each carries the section's JSON as data-copy. Autoescape encodes JSON
+    # quotes as &#34; -- decode and JSON-parse to verify the payload survives
+    payloads = [json_mod.loads(html_mod.unescape(m.group(1)))
+                for m in re.finditer(r"data-copy='([^']*)'", text)]
+    assert len(payloads) == 3
+    # third payload = the faq block itself
+    assert payloads[2]["name"] == "faq"
+    assert payloads[2]["fields"]["title"] == "FAQS"
     assert 'navigator.clipboard' in text            # handler script present
 
 
