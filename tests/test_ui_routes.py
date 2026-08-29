@@ -197,7 +197,7 @@ def test_result_page_renders_rte_html_preview():
             "page": {"properties": {"title": "T"}},
             "blocks": [{
                 "name": "hero-banner", "variant": None,
-                "fields": {"title": "Hero", "description": "<p>Hello <strong>world</strong></p>"},
+                "fields": {"title": "Hero", "htmltext": "<p>Hello <strong>world</strong></p>"},
                 "items": [], "table": None,
             }],
         },
@@ -256,11 +256,10 @@ def test_result_page_renders_items_with_image_thumbnail():
                     "id": None, "implicit": True,
                     "fields": {
                         "title": "Financial Protection",
-                        "description": "<p>Card body</p>",
+                        "htmltext": "<p>Card body</p>",
                         "image": {"source": "embedded", "name": "image-1.png",
                                   "path": "ui/static/assets/run-x/image-1.png"},
                     },
-                    "headings": [],
                 }],
                 "table": None,
             }],

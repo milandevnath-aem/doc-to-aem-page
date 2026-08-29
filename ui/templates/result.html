@@ -47,7 +47,7 @@
     <h3>Fields</h3>
     {% for key, value in block.fields.items() %}
     <p><strong>{{ key }}</strong>:
-    {% if key in ["description", "body", "answer"] %}
+    {% if key == "htmltext" %}
     <div class="rte-preview">{{ value | safe }}</div>
     {% else %}
     {{ value }}
@@ -63,7 +63,7 @@
     <img class="asset-thumb" src="/static/{{ value.path.split('/static/', 1)[1] }}" alt="{{ value.name }}" style="max-height: 80px; vertical-align: middle;">
     {% endif %}
     {{ value.name }} ({{ value.source }})
-    {% elif key in ["description", "body", "answer"] %}
+    {% elif key == "htmltext" %}
     <div class="rte-preview">{{ value | safe }}</div>
     {% else %}
     {{ value }}

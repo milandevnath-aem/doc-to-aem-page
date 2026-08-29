@@ -168,7 +168,6 @@ class _DslParser:
             "variant": variant,
             "fields": {},
             "items": [],
-            "headings": [],
             "table": None,
         }
         self.blocks.append(self._component)
@@ -179,14 +178,14 @@ class _DslParser:
     def _start_item(self, item_id: str):
         if self._component is None:
             return
-        self._item = {"id": item_id, "implicit": False, "fields": {}, "headings": []}
+        self._item = {"id": item_id, "implicit": False, "fields": {}}
         self._component["items"].append(self._item)
         self._active_field = None
 
     def _start_implicit_item(self) -> dict:
         """v2 lenient authoring: items are delimited by icon lines, pasted
         images, or bold labels instead of explicit [card:] markers."""
-        self._item = {"id": None, "implicit": True, "fields": {}, "headings": []}
+        self._item = {"id": None, "implicit": True, "fields": {}}
         self._component["items"].append(self._item)
         self._active_field = None
         return self._item
@@ -280,9 +279,13 @@ class _DslParser:
         fields.setdefault("description", []).append({"kind": "para", "spans": spans})
 
     def handle_heading(self, level: int, text: str):
-        target = self._item if self._item is not None else self._component
-        if target is not None:
-            target["headings"].append({"level": level, "text": text})
+        # Word Heading-styled paragraphs at the component level are treated as
+        # RTE content of the active field when one is open. Absent an active
+        # field they fold into the component's htmltext under an <hN> tag.
+        target_fields = self._target_fields()
+        if self._active_field in RTE_FIELDS:
+            blocks = target_fields.setdefault(self._active_field, [])
+            blocks.append({"kind": "heading", "level": level, "spans": [(text, {})]})
 
     def handle_table(self, table: Table):
         rows = _table_to_rows(table)
@@ -350,19 +353,21 @@ class _DslParser:
                 self.handle_plain_line(line, spans)
 
     def _finalize_rte(self, fields: dict):
-        for key in RTE_FIELDS:
-            value = fields.get(key)
-            if isinstance(value, list):
-                fields[key] = _blocks_to_html(value)
-        # AEM-mapping alias: expose the primary RTE HTML under a canonical
-        # `htmltext` key so the mapping layer only has to look at one key
-        # regardless of component shape. body beats description when both
-        # exist -- matches how AEM RTE components are typically named.
+        # Serialize any accumulated RTE blocks (description, body, ...) and
+        # collapse them into a single canonical `htmltext` field so the AEM
+        # mapping layer only ever looks at one key regardless of the source
+        # authoring key. body wins over description when both are present.
+        html = None
         for key in ("body", "description"):
-            v = fields.get(key)
-            if isinstance(v, str) and v:
-                fields["htmltext"] = v
-                break
+            value = fields.pop(key, None)
+            if isinstance(value, list):
+                serialized = _blocks_to_html(value)
+                if html is None and serialized:
+                    html = serialized
+            elif isinstance(value, str) and html is None and value:
+                html = value
+        if html:
+            fields["htmltext"] = html
 
     def to_dict(self, source_path: str, format_name: str = "v1v2") -> dict:
         for component in self.blocks:

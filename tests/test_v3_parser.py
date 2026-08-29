@@ -77,31 +77,34 @@ def test_v3_missing_meta_keys_become_empty_string(tmp_path):
     assert props["url"].startswith("https://")
 
 
-def test_v3_page_description_gets_htmltext_alias(tmp_path):
+def test_v3_page_description_exposes_only_htmltext(tmp_path):
+    """The single RTE key is called `htmltext`; no per-shape aliases."""
     def build(doc):
         _write_v3_metadata_header(doc)
         doc.add_paragraph("Body content.")
 
     path = _build(tmp_path / "alias.docx", build)
     block = parse_docx(path)["blocks"][0]
-    assert block["fields"]["body"] == "<p>Body content.</p>"
     assert block["fields"]["htmltext"] == "<p>Body content.</p>"
+    assert "body" not in block["fields"]
+    assert "headings" not in block
 
 
-def test_v3_faq_items_get_htmltext_alias(tmp_path):
+def test_v3_faq_items_expose_only_htmltext(tmp_path):
     def build(doc):
         _write_v3_metadata_header(doc)
         doc.add_paragraph("Body.")
         _bold_para(doc, "FAQS")
         _bold_para(doc, "Question 1?")
         doc.add_paragraph("Answer one.")
-        _bold_para(doc, "Question 2?")
-        doc.add_paragraph("Answer two.")
 
     path = _build(tmp_path / "faq-alias.docx", build)
     faq = parse_docx(path)["blocks"][1]
-    for item in faq["items"]:
-        assert item["fields"]["htmltext"] == item["fields"]["answer"]
+    item = faq["items"][0]
+    assert item["fields"]["question"] == "Question 1?"
+    assert item["fields"]["htmltext"] == "<p>Answer one.</p>"
+    assert "answer" not in item["fields"]
+    assert "headings" not in item
 
 
 def test_v3_body_becomes_single_page_description_with_headings_and_bullets(tmp_path):
@@ -119,7 +122,7 @@ def test_v3_body_becomes_single_page_description_with_headings_and_bullets(tmp_p
     assert len(blocks) == 1
     body = blocks[0]
     assert body["name"] == "page-description"
-    assert body["fields"]["body"] == (
+    assert body["fields"]["htmltext"] == (
         "<p>Intro paragraph.</p>"
         "<h2>Section Heading</h2>"
         "<p>Section text.</p>"
@@ -136,7 +139,7 @@ def test_v3_table_in_body_becomes_rte_table(tmp_path):
         tbl.cell(1, 0).text, tbl.cell(1, 1).text = "1", "2"
 
     path = _build(tmp_path / "table.docx", build)
-    body_html = parse_docx(path)["blocks"][0]["fields"]["body"]
+    body_html = parse_docx(path)["blocks"][0]["fields"]["htmltext"]
     assert "<p>Compare:</p>" in body_html
     assert "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>" in body_html
 
@@ -160,9 +163,9 @@ def test_v3_faq_section_splits_into_question_answer_items(tmp_path):
     assert len(faq["items"]) == 2
     q1, q2 = faq["items"]
     assert q1["fields"]["question"] == "What is pre-authorization?"
-    assert q1["fields"]["answer"] == "<p>Pre-authorization is an approval...</p>"
+    assert q1["fields"]["htmltext"] == "<p>Pre-authorization is an approval...</p>"
     assert q2["fields"]["question"] == "Is it required for both claim types?"
-    assert q2["fields"]["answer"] == "<p>Only for cashless treatment.</p><ul><li>Note one</li></ul>"
+    assert q2["fields"]["htmltext"] == "<p>Only for cashless treatment.</p><ul><li>Note one</li></ul>"
 
 
 def test_v3_final_thought_splits_out_trailing_page_description(tmp_path):
@@ -178,7 +181,7 @@ def test_v3_final_thought_splits_out_trailing_page_description(tmp_path):
     path = _build(tmp_path / "final.docx", build)
     blocks = parse_docx(path)["blocks"]
     assert [b["name"] for b in blocks] == ["page-description", "faq", "page-description"]
-    closing = blocks[2]["fields"]["body"]
+    closing = blocks[2]["fields"]["htmltext"]
     assert closing == "<h2>Final Thought</h2><p>Closing paragraph.</p>"
 
 
@@ -202,12 +205,12 @@ def test_v3_real_client_doc_e2e():
     assert len(faq_items) == 8
     assert faq_items[0]["fields"]["question"] == "What is pre-authorization in health insurance?"
 
-    body_html = result["blocks"][0]["fields"]["body"]
+    body_html = result["blocks"][0]["fields"]["htmltext"]
     assert "<table>" in body_html                            # differences table
     assert "<h3>What is Cashless Treatment?</h3>" in body_html
     assert "<ul><li>" in body_html                            # bullet list
 
-    closing = result["blocks"][2]["fields"]["body"]
+    closing = result["blocks"][2]["fields"]["htmltext"]
     assert "<h2>Final Thought</h2>" in closing
 
 

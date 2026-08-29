@@ -52,10 +52,10 @@ def _add_bullet(doc, text):
     return p
 
 
-def test_v1_v2_component_gets_htmltext_alias_from_description(tmp_path):
-    """AEM-mapping alias: every RTE-carrying component gets a canonical
-    `htmltext` sibling of the RTE field so the mapping layer only has to
-    look at one key regardless of component shape."""
+def test_v1_v2_component_uses_only_htmltext_for_rte(tmp_path):
+    """The RTE field on any component is exposed under one canonical name --
+    `htmltext` -- and the source-authoring key (`description:` / `body:`)
+    does NOT leak through to the output NCM."""
     def build(doc):
         _add_metadata(doc)
         doc.add_paragraph("[component: hero-banner]")
@@ -66,13 +66,16 @@ def test_v1_v2_component_gets_htmltext_alias_from_description(tmp_path):
 
     path = _build_docx(tmp_path / "hero.docx", build)
     hero = parse_docx(path)["blocks"][0]
-    assert hero["fields"]["description"] == "<p>Hello world.</p>"
     assert hero["fields"]["htmltext"] == "<p>Hello world.</p>"
+    assert "description" not in hero["fields"]
+    assert "body" not in hero["fields"]
+    assert "headings" not in hero  # dropped -- was never populated for v2/v3 anyway
 
 
-def test_v1_cardandrte_body_beats_description_for_htmltext(tmp_path):
-    """When both body and description exist on the same component, body wins
-    -- matches how AEM RTE components are typically named."""
+def test_v1_cardandrte_body_wins_when_both_body_and_description_authored(tmp_path):
+    """A component authored with BOTH `body:` and `description:` keys -- body
+    wins for the canonical htmltext (matches how AEM RTE components are
+    typically named)."""
     def build(doc):
         _add_metadata(doc)
         doc.add_paragraph("[component: cardandRTE]")
@@ -83,13 +86,15 @@ def test_v1_cardandrte_body_beats_description_for_htmltext(tmp_path):
 
     path = _build_docx(tmp_path / "both.docx", build)
     card = parse_docx(path)["blocks"][0]
-    assert card["fields"]["body"] == "<p>Body text.</p>"
-    assert card["fields"]["description"] == "<p>Description text.</p>"
     assert card["fields"]["htmltext"] == "<p>Body text.</p>"
+    # neither source key survives the rename
+    assert "body" not in card["fields"]
+    assert "description" not in card["fields"]
 
 
-def test_v2_lenient_item_gets_htmltext_alias_from_description(tmp_path):
-    """v2 lenient items with a description RTE field must also get the alias."""
+def test_v2_lenient_item_uses_only_htmltext_for_rte(tmp_path):
+    """v2 lenient items with an implicit description RTE field expose it as
+    `htmltext` -- no separate description key on the output."""
     def build(doc):
         _add_metadata(doc)
         doc.add_paragraph("[component: featurecards]")
@@ -98,8 +103,8 @@ def test_v2_lenient_item_gets_htmltext_alias_from_description(tmp_path):
 
     path = _build_docx(tmp_path / "v2card.docx", build)
     item = parse_docx(path)["blocks"][0]["items"][0]
-    assert item["fields"]["description"] == "<p>Card body text.</p>"
     assert item["fields"]["htmltext"] == "<p>Card body text.</p>"
+    assert "description" not in item["fields"]
 
 
 def test_component_without_rte_field_gets_no_htmltext(tmp_path):
@@ -140,7 +145,7 @@ def test_parse_docx_extracts_rte_html_and_plain_fields(tmp_path):
     hero = result["blocks"][0]
     assert hero["name"] == "hero-banner"
     assert hero["fields"]["title"] == "Hero Title"
-    assert hero["fields"]["description"] == "<p>Plain text with <strong>bold text</strong> after it.</p>"
+    assert hero["fields"]["htmltext"] == "<p>Plain text with <strong>bold text</strong> after it.</p>"
 
 
 def test_parse_docx_table_under_rte_field_becomes_html_table(tmp_path):
@@ -164,7 +169,7 @@ def test_parse_docx_table_under_rte_field_becomes_html_table(tmp_path):
 
     card = result["blocks"][0]
     assert card["name"] == "cardandRTE"
-    assert card["fields"]["description"] == (
+    assert card["fields"]["htmltext"] == (
         "<table><tr><th>Key Features</th><th>Benefits</th></tr>"
         "<tr><td>Own Damage Cover</td><td>Available</td></tr></table>"
     )
@@ -190,7 +195,7 @@ def test_parse_docx_lenient_icon_lines_split_into_items(tmp_path):
     first, second = comp["items"]
     assert first["fields"]["image"] == {"source": "reference", "name": "location1.png", "path": None}
     assert first["fields"]["title"] == "Financial Protection"
-    assert first["fields"]["description"] == "<p>Insurance helps manage unexpected expenses.</p>"
+    assert first["fields"]["htmltext"] == "<p>Insurance helps manage unexpected expenses.</p>"
     assert second["fields"]["image"]["name"] == "location2.png"
     assert second["fields"]["title"] == "Peace of Mind"
 
@@ -215,12 +220,12 @@ def test_parse_docx_lenient_bold_labels_split_numbered_items(tmp_path):
     assert len(comp["items"]) == 2
     step1, step2 = comp["items"]
     assert step1["fields"]["title"] == "Step 1: Identify Your Insurance Needs"
-    assert step1["fields"]["description"] == (
+    assert step1["fields"]["htmltext"] == (
         "<p>Determine why you need insurance.</p>"
         "<ul><li>Health emergencies</li><li>Vehicle accidents</li></ul>"
     )
     assert step2["fields"]["title"] == "Step 2: Determine the Coverage Amount"
-    assert step2["fields"]["description"] == "<p>Choose adequate coverage.</p>"
+    assert step2["fields"]["htmltext"] == "<p>Choose adequate coverage.</p>"
 
 
 def test_parse_docx_lenient_hero_implicit_title_and_inline_keys(tmp_path):
@@ -236,7 +241,7 @@ def test_parse_docx_lenient_hero_implicit_title_and_inline_keys(tmp_path):
 
     hero = result["blocks"][0]
     assert hero["fields"]["title"] == "Tips for Buying Insurance: A Complete Guide"
-    assert hero["fields"]["description"] == "<p>An intro paragraph under the hero.</p>"
+    assert hero["fields"]["htmltext"] == "<p>An intro paragraph under the hero.</p>"
     assert hero["fields"]["data-of-release"] == "June 23, 2026"
     assert hero["fields"]["estimated-read-time"] == "4 min read"
 
@@ -259,7 +264,7 @@ def test_parse_docx_strict_keys_still_win_over_lenient_rules(tmp_path):
     hero = result["blocks"][0]
     assert hero["fields"]["title"] == "Explicit Title"
     # bold paragraph under an active RTE key is content, not an item delimiter
-    assert hero["fields"]["description"] == "<p><strong>All bold description line.</strong></p>"
+    assert hero["fields"]["htmltext"] == "<p><strong>All bold description line.</strong></p>"
     assert hero["items"] == []
 
 
@@ -288,7 +293,7 @@ def test_parse_docx_extracts_embedded_image_to_assets_dir(tmp_path):
     assert image["path"] == (assets_dir / "image-1.png").as_posix()
     assert (assets_dir / "image-1.png").read_bytes() == PNG_1PX
     assert item["fields"]["title"] == "Pasted Card Title"
-    assert item["fields"]["description"] == "<p>Pasted card description.</p>"
+    assert item["fields"]["htmltext"] == "<p>Pasted card description.</p>"
 
 
 def test_parse_docx_embedded_image_without_assets_dir_records_no_path(tmp_path):
@@ -391,7 +396,7 @@ def test_parse_real_v2_client_doc_end_to_end():
 
     teaser = blocks[6]["items"][0]
     assert teaser["fields"]["title"] == "Expert Tips for Buying Insurance"
-    assert teaser["fields"]["description"].count("<li>") == 6
+    assert teaser["fields"]["htmltext"].count("<li>") == 6
 
     assert result["page"]["properties"]["title"] == "Family Health Insurance | IFFCO Tokio"
 

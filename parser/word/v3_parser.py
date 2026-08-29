@@ -79,7 +79,6 @@ class _V3Parser:
             "variant": None,
             "fields": {"body": []},  # list of RTE blocks; finalized to HTML in to_dict
             "items": [],
-            "headings": [],
             "table": None,
         }
         self.blocks.append(self._current)
@@ -91,7 +90,6 @@ class _V3Parser:
             "variant": None,
             "fields": {"title": "FAQS"},
             "items": [],
-            "headings": [],
             "table": None,
         }
         self.blocks.append(self._current)
@@ -101,8 +99,10 @@ class _V3Parser:
         self._faq_item = {
             "id": None,
             "implicit": True,
+            # `answer` is the working-list of RTE blocks; renamed to
+            # `htmltext` in to_dict once serialized. Keeps the state
+            # machine readable while producing the canonical output key.
             "fields": {"question": question, "answer": []},
-            "headings": [],
         }
         self._current["items"].append(self._faq_item)
 
@@ -217,15 +217,11 @@ class _V3Parser:
             self.page_properties.setdefault(k, "")
         for block in self.blocks:
             if block["name"] == "page-description":
-                html = _blocks_to_html(block["fields"]["body"])
-                block["fields"]["body"] = html
-                # AEM-mapping alias: canonical `htmltext` key across shapes
-                block["fields"]["htmltext"] = html
+                # rename body -> htmltext (single canonical RTE key)
+                block["fields"]["htmltext"] = _blocks_to_html(block["fields"].pop("body"))
             elif block["name"] == "faq":
                 for item in block["items"]:
-                    html = _blocks_to_html(item["fields"]["answer"])
-                    item["fields"]["answer"] = html
-                    item["fields"]["htmltext"] = html
+                    item["fields"]["htmltext"] = _blocks_to_html(item["fields"].pop("answer"))
         return {
             "version": "0.1",
             "format": format_name,
