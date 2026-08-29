@@ -52,6 +52,70 @@ def _add_bullet(doc, text):
     return p
 
 
+def test_v1_v2_component_gets_htmltext_alias_from_description(tmp_path):
+    """AEM-mapping alias: every RTE-carrying component gets a canonical
+    `htmltext` sibling of the RTE field so the mapping layer only has to
+    look at one key regardless of component shape."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: hero-banner]")
+        doc.add_paragraph("title:")
+        doc.add_paragraph("Hero Title")
+        doc.add_paragraph("description:")
+        doc.add_paragraph("Hello world.")
+
+    path = _build_docx(tmp_path / "hero.docx", build)
+    hero = parse_docx(path)["blocks"][0]
+    assert hero["fields"]["description"] == "<p>Hello world.</p>"
+    assert hero["fields"]["htmltext"] == "<p>Hello world.</p>"
+
+
+def test_v1_cardandrte_body_beats_description_for_htmltext(tmp_path):
+    """When both body and description exist on the same component, body wins
+    -- matches how AEM RTE components are typically named."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: cardandRTE]")
+        doc.add_paragraph("description:")
+        doc.add_paragraph("Description text.")
+        doc.add_paragraph("body:")
+        doc.add_paragraph("Body text.")
+
+    path = _build_docx(tmp_path / "both.docx", build)
+    card = parse_docx(path)["blocks"][0]
+    assert card["fields"]["body"] == "<p>Body text.</p>"
+    assert card["fields"]["description"] == "<p>Description text.</p>"
+    assert card["fields"]["htmltext"] == "<p>Body text.</p>"
+
+
+def test_v2_lenient_item_gets_htmltext_alias_from_description(tmp_path):
+    """v2 lenient items with a description RTE field must also get the alias."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: featurecards]")
+        doc.add_paragraph().add_run("Cards").bold = True
+        _add_soft_broken(doc, "icon: location1.png", "Card Title", "Card body text.")
+
+    path = _build_docx(tmp_path / "v2card.docx", build)
+    item = parse_docx(path)["blocks"][0]["items"][0]
+    assert item["fields"]["description"] == "<p>Card body text.</p>"
+    assert item["fields"]["htmltext"] == "<p>Card body text.</p>"
+
+
+def test_component_without_rte_field_gets_no_htmltext(tmp_path):
+    """A pure-scalar component (no description/body) must not gain an empty
+    htmltext key."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: hero-banner]")
+        doc.add_paragraph("title:")
+        doc.add_paragraph("Only a title.")
+
+    path = _build_docx(tmp_path / "scalar.docx", build)
+    hero = parse_docx(path)["blocks"][0]
+    assert "htmltext" not in hero["fields"]
+
+
 def test_parse_docx_extracts_rte_html_and_plain_fields(tmp_path):
     def build(doc):
         doc.add_paragraph("[metadata]")

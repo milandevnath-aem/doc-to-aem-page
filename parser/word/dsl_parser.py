@@ -354,6 +354,15 @@ class _DslParser:
             value = fields.get(key)
             if isinstance(value, list):
                 fields[key] = _blocks_to_html(value)
+        # AEM-mapping alias: expose the primary RTE HTML under a canonical
+        # `htmltext` key so the mapping layer only has to look at one key
+        # regardless of component shape. body beats description when both
+        # exist -- matches how AEM RTE components are typically named.
+        for key in ("body", "description"):
+            v = fields.get(key)
+            if isinstance(v, str) and v:
+                fields["htmltext"] = v
+                break
 
     def to_dict(self, source_path: str, format_name: str = "v1v2") -> dict:
         for component in self.blocks:

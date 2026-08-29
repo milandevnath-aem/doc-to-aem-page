@@ -217,10 +217,15 @@ class _V3Parser:
             self.page_properties.setdefault(k, "")
         for block in self.blocks:
             if block["name"] == "page-description":
-                block["fields"]["body"] = _blocks_to_html(block["fields"]["body"])
+                html = _blocks_to_html(block["fields"]["body"])
+                block["fields"]["body"] = html
+                # AEM-mapping alias: canonical `htmltext` key across shapes
+                block["fields"]["htmltext"] = html
             elif block["name"] == "faq":
                 for item in block["items"]:
-                    item["fields"]["answer"] = _blocks_to_html(item["fields"]["answer"])
+                    html = _blocks_to_html(item["fields"]["answer"])
+                    item["fields"]["answer"] = html
+                    item["fields"]["htmltext"] = html
         return {
             "version": "0.1",
             "format": format_name,

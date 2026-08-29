@@ -77,6 +77,33 @@ def test_v3_missing_meta_keys_become_empty_string(tmp_path):
     assert props["url"].startswith("https://")
 
 
+def test_v3_page_description_gets_htmltext_alias(tmp_path):
+    def build(doc):
+        _write_v3_metadata_header(doc)
+        doc.add_paragraph("Body content.")
+
+    path = _build(tmp_path / "alias.docx", build)
+    block = parse_docx(path)["blocks"][0]
+    assert block["fields"]["body"] == "<p>Body content.</p>"
+    assert block["fields"]["htmltext"] == "<p>Body content.</p>"
+
+
+def test_v3_faq_items_get_htmltext_alias(tmp_path):
+    def build(doc):
+        _write_v3_metadata_header(doc)
+        doc.add_paragraph("Body.")
+        _bold_para(doc, "FAQS")
+        _bold_para(doc, "Question 1?")
+        doc.add_paragraph("Answer one.")
+        _bold_para(doc, "Question 2?")
+        doc.add_paragraph("Answer two.")
+
+    path = _build(tmp_path / "faq-alias.docx", build)
+    faq = parse_docx(path)["blocks"][1]
+    for item in faq["items"]:
+        assert item["fields"]["htmltext"] == item["fields"]["answer"]
+
+
 def test_v3_body_becomes_single_page_description_with_headings_and_bullets(tmp_path):
     def build(doc):
         _write_v3_metadata_header(doc)
