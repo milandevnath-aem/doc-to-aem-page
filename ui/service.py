@@ -11,6 +11,8 @@ from pathlib import Path
 
 from docx.opc.exceptions import PackageNotFoundError
 
+from aem_client.config import PageTypeConfig
+from mapping.mapper import map_ncm_to_node_tree
 from parser.word.dsl_parser import parse_docx
 from validators.word_structure import Issue, validate_docx
 
@@ -21,6 +23,7 @@ class RunResult:
     filename: str
     issues: list[dict]
     ncm: dict | None
+    aem_tree: dict | None = None
 
 
 def run_pipeline(
@@ -28,6 +31,7 @@ def run_pipeline(
     force: bool = False,
     assets_dir: str | None = None,
     format: str | None = None,
+    page_type_config: PageTypeConfig | None = None,
 ) -> RunResult:
     filename = Path(docx_path).name
 
@@ -41,7 +45,14 @@ def run_pipeline(
     status = "failed" if has_errors else "passed"
 
     ncm = None
+    aem_tree = None
     if not has_errors or force:
         ncm = parse_docx(docx_path, assets_dir=assets_dir, format=format)
+        if page_type_config is not None:
+            aem_tree = map_ncm_to_node_tree(ncm, page_type_config)
 
-    return RunResult(status=status, filename=filename, issues=[dataclasses.asdict(i) for i in issues], ncm=ncm)
+    return RunResult(
+        status=status, filename=filename,
+        issues=[dataclasses.asdict(i) for i in issues],
+        ncm=ncm, aem_tree=aem_tree,
+    )

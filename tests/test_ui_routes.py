@@ -380,6 +380,41 @@ def test_run_route_extracts_embedded_images_to_assets(tmp_path, monkeypatch):
     assert "image-1.png" in result_response.text
 
 
+def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, monkeypatch):
+    """End-to-end: upload a doc while the article sample config is active,
+    result page must show the mapped AEM node tree with the target path."""
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path / "uploads")
+    (tmp_path / "uploads").mkdir()
+
+    import docx as docx_lib
+    document = docx_lib.Document()
+    document.add_paragraph().add_run("Cashless vs Reimbursement").bold = True
+    document.add_paragraph("Meta Title: Cashless vs Reimbursement Guide")
+    document.add_paragraph("Meta Description: A guide.")
+    document.add_paragraph("Meta keywords: kw1, kw2")
+    document.add_paragraph("Body content.")
+    buf = io.BytesIO()
+    document.save(buf)
+    buf.seek(0)
+
+    client = TestClient(app_module.app)
+    posted = client.post(
+        "/run",
+        files={"docx_file": ("cashless.docx", buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        follow_redirects=False,
+    )
+    assert posted.status_code == 303
+
+    page = client.get(posted.headers["location"])
+    text = page.text
+    assert "AEM Node Tree" in text
+    # target JCR path = content_root/<slug from meta title>, from the bundled sample
+    assert "/content/iffcotokio/en/articles/cashless-vs-reimbursement-guide" in text
+    # jcr:content properties visible in the JSON dump
+    assert "iffcotokio/components/text" in text  # page-description mapped
+    assert "cq:template" in text
+
+
 def test_result_page_has_copy_buttons_per_section():
     result = RunResult(
         status="passed",

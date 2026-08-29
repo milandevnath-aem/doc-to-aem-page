@@ -33,6 +33,19 @@
     </summary>
     <pre>{{ run.ncm | html_json(indent=2) }}</pre>
 </details>
+
+{% if run.aem_tree %}
+<details>
+    <summary>AEM Node Tree
+        (target path: <code>{{ run.aem_tree.path }}</code>)
+        <button type="button" class="copy-btn" data-copy='{{ run.aem_tree | html_json }}' title="Copy the AEM node tree JSON">📋 Copy</button>
+    </summary>
+    <pre>{{ run.aem_tree | html_json(indent=2) }}</pre>
+</details>
+{% else %}
+<p><em>No AEM node tree — set a page-type config on the home page then re-run.</em></p>
+{% endif %}
+
 <details open>
     <summary>Page Properties
         <button type="button" class="copy-btn" data-copy='{{ run.ncm.page.properties | html_json }}' title="Copy this section's JSON">📋 Copy</button>

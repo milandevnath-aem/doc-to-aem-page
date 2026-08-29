@@ -147,11 +147,14 @@ def run(
     with dest.open("wb") as f:
         shutil.copyfileobj(docx_file.file, f)
 
+    site = load_site_config(SITE_CONFIG_PATH)
+    page_type_cfg, _ = _current_page_type_config(site.active_page_type)
     result = run_pipeline(
         str(dest),
         force=(force == "true"),
         assets_dir=str(ASSETS_DIR / str(upload_id)),
         format=(format or None),
+        page_type_config=page_type_cfg,
     )
     run_id = save_run(result)
 
