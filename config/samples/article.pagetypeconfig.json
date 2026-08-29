@@ -1,0 +1,16 @@
+{
+  "type": "article",
+  "templatePath": "/conf/iffcotokio/settings/wcm/templates/article",
+  "contentRoot": "/content/iffcotokio/en/articles",
+  "damRoot": "/content/dam/iffcotokio/articles",
+  "pageNameStrategy": "slug_from_meta_title",
+  "componentMappings": {
+    "hero-banner": "iffcotokio/components/herobanner",
+    "page-description": "iffcotokio/components/text",
+    "faq": "iffcotokio/components/faq",
+    "featurecards": "iffcotokio/components/featurecards",
+    "cardandrte": "iffcotokio/components/cardandrte",
+    "cards-with-full-width": "iffcotokio/components/cardswithfullwidth",
+    "teasercomponent": "iffcotokio/components/teaser"
+  }
+}

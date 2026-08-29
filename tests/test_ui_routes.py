@@ -25,6 +25,66 @@ def test_home_page_renders_upload_form():
     assert 'value="v3"' in response.text
 
 
+def test_home_page_shows_aem_site_config_section():
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    text = response.text
+    # AEM config header + form + three action buttons
+    assert "AEM site config" in text
+    assert 'name="aem_base_url"' in text
+    assert 'name="active_page_type"' in text
+    assert 'name="auth_token_env"' in text
+    assert 'action="/config/site"' in text
+    assert 'action="/config/fetch"' in text
+    assert 'action="/config/load-sample"' in text
+    # default local AEM base URL is prefilled
+    assert "http://localhost:4502" in text
+
+
+def test_load_sample_route_writes_page_type_cache(tmp_path, monkeypatch):
+    """POST /config/load-sample must materialize the bundled sample into
+    the cache dir so subsequent pipeline runs read the same file."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+
+    client = TestClient(app_module.app)
+    response = client.post("/config/load-sample", follow_redirects=False)
+
+    assert response.status_code == 303
+    cached = cache_dir / "article.pagetypeconfig.json"
+    assert cached.exists()
+    text = cached.read_text(encoding="utf-8")
+    assert '"template_path"' in text
+    assert 'iffcotokio/components/text' in text  # from the bundled sample
+
+
+def test_home_page_reflects_saved_site_config(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+
+    client = TestClient(app_module.app)
+    saved = client.post(
+        "/config/site",
+        data={
+            "aem_base_url": "http://custom-aem:4503",
+            "active_page_type": "article",
+            "auth_token_env": "AEM_TOKEN_STAGE",
+            "article_cf_path": "/content/dam/x/article",
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code == 303
+
+    home = client.get("/")
+    assert "http://custom-aem:4503" in home.text
+    assert "AEM_TOKEN_STAGE" in home.text
+    assert "/content/dam/x/article" in home.text
+
+
 def test_run_route_forwards_format_override(tmp_path, monkeypatch):
     """Explicit format on the form must reach the parser and end up on the
     result page's detected-format badge."""

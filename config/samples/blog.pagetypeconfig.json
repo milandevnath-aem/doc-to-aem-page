@@ -1,0 +1,12 @@
+{
+  "type": "blog",
+  "templatePath": "/conf/iffcotokio/settings/wcm/templates/blog",
+  "contentRoot": "/content/iffcotokio/en/blogs",
+  "damRoot": "/content/dam/iffcotokio/blogs",
+  "pageNameStrategy": "slug_from_meta_title",
+  "componentMappings": {
+    "hero-banner": "iffcotokio/components/herobanner",
+    "page-description": "iffcotokio/components/text",
+    "faq": "iffcotokio/components/faq"
+  }
+}

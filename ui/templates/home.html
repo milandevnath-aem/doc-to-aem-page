@@ -2,6 +2,68 @@
 {% block title %}Run Pipeline{% endblock %}
 {% block content %}
 <h1>Run Pipeline</h1>
+
+<details class="aem-config" {% if not active_config %}open{% endif %}>
+    <summary>
+        AEM site config —
+        page type: <strong>{{ site.active_page_type }}</strong>,
+        source: <em>{{ active_source }}</em>
+    </summary>
+    <form action="/config/site" method="post" class="config-form">
+        <p>
+            <label for="aem_base_url">AEM base URL</label><br>
+            <input type="url" id="aem_base_url" name="aem_base_url"
+                   value="{{ site.aem_base_url }}" size="50" required>
+            <br><small>Local dev: <code>http://localhost:4502</code></small>
+        </p>
+        <p>
+            <label for="active_page_type">Active page type</label><br>
+            <input type="text" id="active_page_type" name="active_page_type"
+                   value="{{ site.active_page_type }}" required>
+        </p>
+        <p>
+            <label for="auth_token_env">Auth token env-var name</label><br>
+            <input type="text" id="auth_token_env" name="auth_token_env"
+                   value="{{ site.auth_token_env }}">
+            <br><small>Never stored in the form; read from
+                <code>os.environ[&lt;this&gt;]</code> at fetch time.</small>
+        </p>
+        <p>
+            <label for="article_cf_path">Article Content Fragment path</label><br>
+            <input type="text" id="article_cf_path" name="article_cf_path"
+                   value="{{ site.cf_paths.get('article', '') }}" size="60">
+        </p>
+        <button type="submit">Save site config</button>
+    </form>
+
+    <div class="config-actions">
+        <form action="/config/fetch" method="post" style="display:inline">
+            <button type="submit">Fetch from AEM</button>
+        </form>
+        <form action="/config/load-sample" method="post" style="display:inline">
+            <button type="submit">Load sample config</button>
+        </form>
+    </div>
+
+    {% if active_config %}
+    <div class="config-preview">
+        <p><strong>Template path:</strong> <code>{{ active_config.template_path }}</code></p>
+        <p><strong>Content root:</strong> <code>{{ active_config.content_root }}</code></p>
+        <p><strong>DAM root:</strong> <code>{{ active_config.dam_root }}</code></p>
+        <p><strong>Component mappings ({{ active_config.component_mappings | length }}):</strong></p>
+        <ul>
+        {% for source, resource_type in active_config.component_mappings.items() %}
+            <li><code>{{ source }}</code> → <code>{{ resource_type }}</code></li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <p><em>No config loaded for <code>{{ site.active_page_type }}</code>.
+        Click <strong>Load sample config</strong> to use a bundled default,
+        or <strong>Fetch from AEM</strong> once the CF path is set.</em></p>
+    {% endif %}
+</details>
+
 <form action="/run" method="post" enctype="multipart/form-data">
     <p>
         <label for="docx_file">.docx file</label><br>

@@ -1,0 +1,147 @@
+"""AEM CF fetcher.
+
+Hits AEM's out-of-the-box `.model.json` endpoint on a Content Fragment,
+maps the CF fields to a `PageTypeConfig`, and caches the result to disk.
+
+Falls back to the bundled sample when AEM is unreachable OR when explicitly
+asked to load samples -- lets the pipeline stay productive without a live
+AEM.
+"""
+
+
+import httpx
+import pytest
+
+from aem_client.config import PageTypeConfig
+from aem_client.fetcher import (
+    FetchError,
+    fetch_page_type_config,
+    fetch_or_cached,
+)
+
+# Shape of the JSON returned by AEM's Content Fragment .model.json endpoint
+# (simplified but structurally accurate).
+CF_PAYLOAD = {
+    "type": "article",
+    "templatePath": "/conf/iffcotokio/settings/wcm/templates/article",
+    "contentRoot": "/content/iffcotokio/en/articles",
+    "damRoot": "/content/dam/iffcotokio/articles",
+    "pageNameStrategy": "slug_from_meta_title",
+    "componentMappings": {
+        "page-description": "iffcotokio/components/text",
+        "faq": "iffcotokio/components/faq",
+    },
+    "jcr:primaryType": "nt:unstructured",
+}
+
+
+def _mock_transport(status: int = 200, payload: dict | None = None,
+                    err: type[Exception] | None = None):
+    """Build an httpx MockTransport that returns the given response or raises."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if err is not None:
+            raise err("mock network error")
+        return httpx.Response(status, json=payload or {})
+    return httpx.MockTransport(handler)
+
+
+def test_fetch_returns_page_type_config_from_cf_json():
+    transport = _mock_transport(200, CF_PAYLOAD)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_page_type_config(
+            client,
+            base_url="http://localhost:4502",
+            cf_path="/content/dam/iffcotokio/site-config/article",
+        )
+    assert isinstance(cfg, PageTypeConfig)
+    assert cfg.type == "article"
+    assert cfg.template_path == "/conf/iffcotokio/settings/wcm/templates/article"
+    assert cfg.component_mappings["faq"] == "iffcotokio/components/faq"
+
+
+def test_fetch_hits_the_expected_endpoint():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["method"] = request.method
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json=CF_PAYLOAD)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        fetch_page_type_config(
+            client,
+            base_url="http://localhost:4502",
+            cf_path="/content/dam/x/article",
+            auth_token="Basic YWRtaW46YWRtaW4=",
+        )
+
+    assert seen["method"] == "GET"
+    # Sling's Content Fragment JSON endpoint
+    assert seen["url"] == (
+        "http://localhost:4502/content/dam/x/article/jcr:content/data/master.json"
+    )
+    assert seen["auth"] == "Basic YWRtaW46YWRtaW4="
+
+
+def test_fetch_raises_on_non_200():
+    transport = _mock_transport(status=401, payload={"error": "unauthorized"})
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(FetchError) as excinfo:
+            fetch_page_type_config(
+                client, "http://localhost:4502",
+                "/content/dam/x/article",
+            )
+    assert "401" in str(excinfo.value)
+
+
+def test_fetch_raises_on_network_error():
+    transport = _mock_transport(err=httpx.ConnectError)
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(FetchError):
+            fetch_page_type_config(
+                client, "http://localhost:4502",
+                "/content/dam/x/article",
+            )
+
+
+def test_fetch_or_cached_writes_cache_on_success(tmp_path):
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    transport = _mock_transport(200, CF_PAYLOAD)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_or_cached(
+            client, "http://localhost:4502",
+            "/content/dam/x/article", cache_path,
+        )
+    assert cfg.type == "article"
+    assert cache_path.exists()
+    # cache is a plain snake_case JSON, re-loadable without another fetch
+    text = cache_path.read_text(encoding="utf-8")
+    assert '"template_path"' in text
+
+
+def test_fetch_or_cached_falls_back_to_cache_on_network_failure(tmp_path):
+    """A prior successful fetch left a cache file. Network is now down.
+    fetch_or_cached must return the cached copy instead of raising."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    # seed the cache with a prior fetch
+    transport_ok = _mock_transport(200, CF_PAYLOAD)
+    with httpx.Client(transport=transport_ok) as client:
+        fetch_or_cached(client, "http://localhost:4502",
+                        "/content/dam/x/article", cache_path)
+    # now simulate a network failure
+    transport_down = _mock_transport(err=httpx.ConnectError)
+    with httpx.Client(transport=transport_down) as client:
+        cfg = fetch_or_cached(client, "http://localhost:4502",
+                              "/content/dam/x/article", cache_path)
+    assert cfg.type == "article"
+
+
+def test_fetch_or_cached_raises_when_no_network_and_no_cache(tmp_path):
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    transport = _mock_transport(err=httpx.ConnectError)
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(FetchError):
+            fetch_or_cached(client, "http://localhost:4502",
+                            "/content/dam/x/article", cache_path)
