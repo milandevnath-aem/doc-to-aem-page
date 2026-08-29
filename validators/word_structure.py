@@ -15,11 +15,19 @@ from dataclasses import dataclass
 from docx import Document
 
 from parser.word.dsl_parser import CARD_RE, COMPONENT_RE, MARKER_RE, _DslParser, walk_document
+from parser.word.format_detect import detect_format
+from parser.word.v3_parser import _V3Parser
 
 # ponytail: hardcoded allow-list for now. Move to config/mappings/*.yaml once
 # the mapping layer exists (Sprint 3) so it's one source of truth instead of two.
-KNOWN_COMPONENTS = {"hero-banner", "cards-with-full-width", "featurecards", "cardandrte", "teasercomponent"}
+KNOWN_COMPONENTS = {
+    "hero-banner", "cards-with-full-width", "featurecards", "cardandrte",
+    "teasercomponent", "page-description", "faq",
+}
 REQUIRED_METADATA = {"title", "description"}
+# v3-format meta keys the parser fills into page.properties. old_url is
+# intentionally optional (missing = new page, no redirect needed).
+V3_META_KEYS = {"url", "title", "description", "keywords"}
 
 
 @dataclass
@@ -130,10 +138,34 @@ class _ValidatingDslParser(_DslParser):
         return self.issues
 
 
+class _V3Validator(_V3Parser):
+    """Runs the v3 parse and reports issues -- missing meta keys, unknown
+    component names inside blocks (none produced today, but leaves room)."""
+
+    def __init__(self):
+        super().__init__()
+        self.issues: list[Issue] = []
+
+    def finalize(self) -> list[Issue]:
+        # trigger the same finalize path so page.properties get "" defaults
+        self.to_dict("<validation>", "v3")
+        props = self.page_properties
+        for k in sorted(V3_META_KEYS):
+            if not props.get(k):
+                self.issues.append(Issue(
+                    "warning", "missing-v3-meta",
+                    f"v3 metadata field '{k}' is empty. Fill it in the top block of the document.",
+                    0, "", "",
+                ))
+        return self.issues
+
+
 def validate_docx(path: str) -> list[Issue]:
     document = Document(path)
-    parser = walk_document(document, _ValidatingDslParser())
-    return parser.finalize()
+    fmt = detect_format(document)
+    if fmt == "v3":
+        return walk_document(document, _V3Validator()).finalize()
+    return walk_document(document, _ValidatingDslParser()).finalize()
 
 
 def print_issues(issues: list[Issue]):

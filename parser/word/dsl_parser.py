@@ -134,6 +134,10 @@ def _blocks_to_html(blocks: list[dict]) -> str:
         elif block["kind"] == "table":
             html_parts.append(_table_to_html(block["headers"], block["rows"]))
             i += 1
+        elif block["kind"] == "heading":
+            text_html = "".join(_span_html(t, m) for t, m in block["spans"])
+            html_parts.append(f"<h{block['level']}>{text_html}</h{block['level']}>")
+            i += 1
         else:
             text_html = "".join(_span_html(t, m) for t, m in block["spans"])
             if text_html:
@@ -351,13 +355,14 @@ class _DslParser:
             if isinstance(value, list):
                 fields[key] = _blocks_to_html(value)
 
-    def to_dict(self, source_path: str) -> dict:
+    def to_dict(self, source_path: str, format_name: str = "v1v2") -> dict:
         for component in self.blocks:
             self._finalize_rte(component["fields"])
             for item in component["items"]:
                 self._finalize_rte(item["fields"])
         return {
             "version": "0.1",
+            "format": format_name,
             "source": {"type": "word", "path": source_path},
             "page": {"properties": self.page_properties},
             "blocks": self.blocks,
@@ -379,10 +384,24 @@ def walk_document(document: Document, parser: "_DslParser") -> "_DslParser":
     return parser
 
 
-def parse_docx(path: str, assets_dir: str | None = None) -> dict:
+def parse_docx(path: str, assets_dir: str | None = None, format: str | None = None) -> dict:
+    """Parse a .docx into NCM JSON.
+
+    `format` controls which parser handles the doc. Omit for auto-detection:
+    documents that use `[metadata]` / `[component:]` markers take the strict /
+    lenient path (`v1v2`), and markerless article documents (bold H1 +
+    `Meta Title:` key lines) take the `v3` path.
+    """
+    from parser.word.format_detect import detect_format
+    from parser.word.v3_parser import _V3Parser
+
     document = Document(path)
-    parser = walk_document(document, _DslParser(assets_dir))
-    return parser.to_dict(str(Path(path)))
+    fmt = format or detect_format(document)
+    if fmt == "v3":
+        parser = walk_document(document, _V3Parser(assets_dir))
+    else:
+        parser = walk_document(document, _DslParser(assets_dir))
+    return parser.to_dict(str(Path(path)), fmt)
 
 
 def main():

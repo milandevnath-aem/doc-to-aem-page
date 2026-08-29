@@ -18,6 +18,41 @@ def test_home_page_renders_upload_form():
     assert response.status_code == 200
     assert 'name="docx_file"' in response.text
     assert 'action="/run"' in response.text
+    # authoring-format selector: auto is the default, all three formats offered
+    assert 'name="format"' in response.text
+    assert 'value=""' in response.text          # auto
+    assert 'value="v1v2"' in response.text
+    assert 'value="v3"' in response.text
+
+
+def test_run_route_forwards_format_override(tmp_path, monkeypatch):
+    """Explicit format on the form must reach the parser and end up on the
+    result page's detected-format badge."""
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+
+    import docx as docx_lib
+    document = docx_lib.Document()
+    document.add_paragraph("[metadata]")
+    table = document.add_table(rows=3, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "Property", "Value"
+    table.cell(1, 0).text, table.cell(1, 1).text = "title", "T"
+    table.cell(2, 0).text, table.cell(2, 1).text = "description", "D"
+    buf = io.BytesIO()
+    document.save(buf)
+    buf.seek(0)
+
+    client = TestClient(app_module.app)
+    response = client.post(
+        "/run",
+        files={"docx_file": ("sample.docx", buf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+        data={"format": "v1v2"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    result_response = client.get(response.headers["location"])
+    assert "Detected format" in result_response.text
+    assert "v1v2" in result_response.text
 
 
 def test_run_route_uploads_and_redirects_to_result(tmp_path, monkeypatch):

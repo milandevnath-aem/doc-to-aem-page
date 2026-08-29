@@ -8,6 +8,14 @@
         <input type="file" id="docx_file" name="docx_file" accept=".docx" required>
     </p>
     <p>
+        <label for="format">Authoring format</label><br>
+        <select id="format" name="format">
+            <option value="" selected>Auto-detect (recommended)</option>
+            <option value="v1v2">v1/v2 — bracket DSL (strict or lenient)</option>
+            <option value="v3">v3 — markerless article + FAQ</option>
+        </select>
+    </p>
+    <p>
         <label>
             <input type="checkbox" name="force" value="true">
             Force parse despite validation errors

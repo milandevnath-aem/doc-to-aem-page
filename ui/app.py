@@ -33,7 +33,11 @@ def home(request: Request):
 
 
 @app.post("/run")
-def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
+def run(
+    docx_file: UploadFile = File(...),
+    force: str = Form(default=""),
+    format: str = Form(default=""),
+):
     if not (docx_file.filename or "").lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only .docx files are accepted.")
 
@@ -43,7 +47,12 @@ def run(docx_file: UploadFile = File(...), force: str = Form(default="")):
     with dest.open("wb") as f:
         shutil.copyfileobj(docx_file.file, f)
 
-    result = run_pipeline(str(dest), force=(force == "true"), assets_dir=str(ASSETS_DIR / str(upload_id)))
+    result = run_pipeline(
+        str(dest),
+        force=(force == "true"),
+        assets_dir=str(ASSETS_DIR / str(upload_id)),
+        format=(format or None),
+    )
     run_id = save_run(result)
 
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
