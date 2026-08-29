@@ -316,6 +316,40 @@ def test_run_route_extracts_embedded_images_to_assets(tmp_path, monkeypatch):
     assert "image-1.png" in result_response.text
 
 
+def test_result_page_has_copy_buttons_per_section():
+    result = RunResult(
+        status="passed",
+        filename="v3.docx",
+        issues=[],
+        ncm={
+            "format": "v3",
+            "page": {"properties": {"title": "T"}},
+            "blocks": [{
+                "name": "faq", "variant": None,
+                "fields": {"title": "FAQS"},
+                "items": [], "table": None,
+            }],
+        },
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    text = response.text
+    # 3 copy buttons: Full NCM, Page Properties, one per block
+    assert text.count('class="copy-btn"') == 3
+    # each carries the section's JSON as data-copy. tojson is safe for
+    # <script> not attributes -- single-quoted attribute + tojson's '
+    # escape for apostrophes keeps the payload intact
+    assert "data-copy='" in text
+    # the block payload must survive intact (double-quoted JSON keys visible).
+    # Jinja's tojson sorts keys alphabetically so 'fields' comes first.
+    assert 'data-copy=\'{"fields":' in text
+    assert '"name": "faq"' in text
+    assert 'navigator.clipboard' in text            # handler script present
+
+
 def test_result_page_404_for_unknown_run():
     client = TestClient(app_module.app)
 

@@ -7,3 +7,7 @@ th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; }
 .severity-error { color: #cf222e; }
 .severity-warning { color: #9a6700; }
 .rte-preview { border: 1px solid #ccc; padding: 1rem; margin: 0.5rem 0; background: #fafafa; }
+
+/* copy-JSON button in section summaries */
+.copy-btn { margin-left: .5rem; padding: 2px 8px; font-size: .8rem; cursor: pointer; border: 1px solid #ccc; background: #f6f8fa; border-radius: 4px; }
+.copy-btn:hover { background: #eaeef2; }
