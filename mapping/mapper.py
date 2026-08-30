@@ -105,9 +105,10 @@ def _build_root_container(ncm: dict, cfg: PageTypeConfig) -> dict:
 
 def _build_component(block: dict, index: int, cfg: PageTypeConfig) -> dict:
     source_name = block["name"]
-    resource_type = cfg.component_mappings.get(source_name)
-    props = _map_fields(block.get("fields", {}), cfg)
-    if resource_type:
+    entry = cfg.component_mappings.get(source_name)
+    resource_type, comp_renames, item_renames = _entry_shape(entry, source_name)
+    props = _map_fields(block.get("fields", {}), cfg, comp_renames)
+    if entry is not None:
         props["sling:resourceType"] = resource_type
     else:
         # No mapping in the CF -- keep the block visible with a
@@ -119,29 +120,50 @@ def _build_component(block: dict, index: int, cfg: PageTypeConfig) -> dict:
         "name": f"{source_name}_{index}",
         "primary_type": "nt:unstructured",
         "properties": props,
-        "children": [_build_item(item, i, cfg)
+        "children": [_build_item(item, i, cfg, item_renames)
                      for i, item in enumerate(block.get("items", []))],
     }
 
 
-def _build_item(item: dict, index: int, cfg: PageTypeConfig) -> dict:
+def _build_item(item: dict, index: int, cfg: PageTypeConfig, renames: dict) -> dict:
     return {
         "name": f"item_{index}",
         "primary_type": "nt:unstructured",
-        "properties": _map_fields(item.get("fields", {}), cfg),
+        "properties": _map_fields(item.get("fields", {}), cfg, renames),
         "children": [],
     }
 
 
-def _map_fields(fields: dict, cfg: PageTypeConfig) -> dict:
+def _entry_shape(entry, source_name: str) -> tuple[str, dict, dict]:
+    """Unpack a component_mappings value into (resourceType, fieldRenames,
+    itemFieldRenames). Accepts both the bare-string form and the nested-dict
+    form -- see docs/superpowers/specs for the CF shape."""
+    if isinstance(entry, str):
+        return entry, {}, {}
+    if isinstance(entry, dict):
+        return (
+            entry.get("resourceType", source_name),
+            entry.get("fieldRenames") or {},
+            entry.get("itemFieldRenames") or {},
+        )
+    # entry is None (unmapped) -- resourceType handled by caller with a gap marker
+    return source_name, {}, {}
+
+
+def _map_fields(fields: dict, cfg: PageTypeConfig, renames: dict | None = None) -> dict:
     """Translate NCM `fields` dict -> JCR property dict.
 
     Rules:
-    - htmltext -> text + textIsRich=true (AEM RTE contract)
+    - Any field named in `renames` is emitted under its renamed property
+      name (and the automatic RTE default -- textIsRich=true for htmltext --
+      is suppressed, since the renamed target may have a different rich-text
+      contract or none at all).
+    - Otherwise htmltext -> text + textIsRich=true (default AEM RTE contract)
     - image dict -> fileReference = dam_root/<name>
-    - anything else -> pass through under its rename target or original name
-    - falsy values dropped so empty strings don't overwrite template defaults
+    - Everything else -> pass through under its rename target or original name
+    - Falsy values dropped so empty strings don't overwrite template defaults
     """
+    renames = renames or {}
     out: dict = {}
     for key, value in fields.items():
         if key == "image":
@@ -150,6 +172,9 @@ def _map_fields(fields: dict, cfg: PageTypeConfig) -> dict:
                 out["fileReference"] = fileref
             continue
         if not value and value != 0:
+            continue
+        if key in renames:
+            out[renames[key]] = value
             continue
         out_key = _FIELD_RENAMES.get(key, key)
         out[out_key] = value

@@ -263,6 +263,67 @@ def test_page_name_strategy_docx_filename_uses_source_stem():
 
 # ---------- real-doc smoke ----------
 
+def test_map_field_rename_replaces_property_name_on_component():
+    """Existing AEM component uses different property names than our NCM.
+    fieldRenames on that component's mapping entry translates our field
+    names to what the component's dialog stores."""
+    cfg = _article_config()
+    cfg.component_mappings["page-description"] = {
+        "resourceType": "iffcotokio/components/text",
+        "fieldRenames": {"htmltext": "richTextContent"},
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "page-description", "variant": None,
+        "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None,
+    }])
+    text = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    props = text["properties"]
+    assert props["richTextContent"] == "<p>x</p>"
+    assert "text" not in props
+    # Overriding htmltext disables the default textIsRich emission -- the
+    # renamed target may have its own richtext contract or not be RTE at all
+    assert "textIsRich" not in props
+
+
+def test_map_item_field_renames_apply_to_faq_and_featurecard_items():
+    cfg = _article_config()
+    cfg.component_mappings["faq"] = {
+        "resourceType": "iffcotokio/components/faq",
+        "fieldRenames": {"title": "faqTitle"},
+        "itemFieldRenames": {"question": "faqQuestion", "htmltext": "faqAnswer"},
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "faq", "variant": None,
+        "fields": {"title": "FAQS"},
+        "items": [
+            {"id": None, "implicit": True,
+             "fields": {"question": "Q?", "htmltext": "<p>A.</p>"}},
+        ], "table": None,
+    }])
+    faq = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    # component-level rename
+    assert faq["properties"]["faqTitle"] == "FAQS"
+    assert "title" not in faq["properties"]
+    # item-level rename
+    item = faq["children"][0]
+    assert item["properties"]["faqQuestion"] == "Q?"
+    assert item["properties"]["faqAnswer"] == "<p>A.</p>"
+    assert "question" not in item["properties"]
+    assert "text" not in item["properties"]
+
+
+def test_map_string_form_component_mapping_still_defaults_to_text_plus_isrich():
+    """Simple string form -- when htmltext is NOT overridden, it maps to
+    text + textIsRich=true (unchanged behavior)."""
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "page-description", "variant": None,
+        "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None,
+    }])
+    text = map_ncm_to_node_tree(ncm, _article_config())["children"][0]["children"][0]["children"][0]
+    assert text["properties"]["text"] == "<p>x</p>"
+    assert text["properties"]["textIsRich"] == "true"
+
+
 def test_map_full_v3_shape_end_to_end():
     """One NCM shaped like the real v3 client doc all the way through --
     smoke check that the tree is deep, ordered, and doesn't lose blocks."""

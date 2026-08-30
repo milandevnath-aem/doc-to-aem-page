@@ -126,3 +126,61 @@ def test_from_dict_ignores_unknown_fields():
 def test_from_dict_missing_required_raises():
     with pytest.raises(KeyError):
         PageTypeConfig.from_dict({"type": "article"})  # missing templatePath, etc.
+
+
+# ------ nested component-mapping value shape ------
+# The mapping value can be a bare resourceType string (old form) OR a dict
+# with resourceType + per-field renames (needed when an existing AEM
+# component uses different property names than our NCM).
+
+def test_component_mapping_string_form_is_kept_verbatim():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {"faq": "iffcotokio/components/faq"},
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.component_mappings["faq"] == "iffcotokio/components/faq"
+
+
+def test_component_mapping_dict_form_normalizes_and_survives_round_trip(tmp_path):
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {
+            "page-description": {
+                "resourceType": "iffcotokio/components/text",
+                "fieldRenames": {"htmltext": "richTextContent"},
+            },
+            "faq": {
+                "resourceType": "iffcotokio/components/faq",
+                "fieldRenames": {"title": "faqTitle"},
+                "itemFieldRenames": {"question": "faqQuestion", "htmltext": "faqAnswer"},
+            },
+        },
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+
+    pd = cfg.component_mappings["page-description"]
+    assert pd["resourceType"] == "iffcotokio/components/text"
+    assert pd["fieldRenames"] == {"htmltext": "richTextContent"}
+
+    faq = cfg.component_mappings["faq"]
+    assert faq["itemFieldRenames"]["question"] == "faqQuestion"
+    assert faq["itemFieldRenames"]["htmltext"] == "faqAnswer"
+
+    # cache round-trip preserves the nested shape
+    path = tmp_path / "cfg.json"
+    save_page_type_config(cfg, path)
+    reloaded = load_page_type_config(path)
+    assert reloaded == cfg
+
+
+def test_component_mapping_dict_missing_resource_type_raises():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {"faq": {"fieldRenames": {"htmltext": "text"}}},
+    }
+    with pytest.raises(KeyError):
+        PageTypeConfig.from_dict(raw)

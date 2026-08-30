@@ -52,8 +52,24 @@
         <p><strong>DAM root:</strong> <code>{{ active_config.dam_root }}</code></p>
         <p><strong>Component mappings ({{ active_config.component_mappings | length }}):</strong></p>
         <ul>
-        {% for source, resource_type in active_config.component_mappings.items() %}
-            <li><code>{{ source }}</code> → <code>{{ resource_type }}</code></li>
+        {% for source, entry in active_config.component_mappings.items() %}
+            <li>
+                {% if entry is string %}
+                    <code>{{ source }}</code> → <code>{{ entry }}</code>
+                {% else %}
+                    <code>{{ source }}</code> → <code>{{ entry.resourceType }}</code>
+                    {% if entry.fieldRenames %}
+                        <br><small>&nbsp;&nbsp;fields:
+                        {% for k, v in entry.fieldRenames.items() %}<code>{{ k }}</code>→<code>{{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                        </small>
+                    {% endif %}
+                    {% if entry.itemFieldRenames %}
+                        <br><small>&nbsp;&nbsp;items:
+                        {% for k, v in entry.itemFieldRenames.items() %}<code>{{ k }}</code>→<code>{{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                        </small>
+                    {% endif %}
+                {% endif %}
+            </li>
         {% endfor %}
         </ul>
     </div>

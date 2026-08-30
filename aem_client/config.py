@@ -71,6 +71,16 @@ class PageTypeConfig:
         missing = required - normalized.keys()
         if missing:
             raise KeyError(f"PageTypeConfig missing required fields: {sorted(missing)}")
+        # component_mappings values may be a bare resourceType string OR a
+        # dict {resourceType, fieldRenames, itemFieldRenames}. Validate the
+        # dict form early so a missing resourceType surfaces at config
+        # load, not deep in the mapper.
+        for source_name, entry in normalized["component_mappings"].items():
+            if isinstance(entry, dict) and "resourceType" not in entry:
+                raise KeyError(
+                    f"component_mappings['{source_name}'] is a dict but is "
+                    "missing 'resourceType'"
+                )
         return cls(**normalized)
 
 

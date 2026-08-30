@@ -5,10 +5,30 @@
   "damRoot": "/content/dam/iffcotokio/articles",
   "pageNameStrategy": "slug_from_meta_title",
   "componentMappings": {
-    "hero-banner": "iffcotokio/components/herobanner",
+    "hero-banner": {
+      "resourceType": "iffcotokio/components/herobanner",
+      "fieldRenames": {
+        "title": "headline",
+        "htmltext": "bodyText"
+      }
+    },
     "page-description": "iffcotokio/components/text",
-    "faq": "iffcotokio/components/faq",
-    "featurecards": "iffcotokio/components/featurecards",
+    "faq": {
+      "resourceType": "iffcotokio/components/faq",
+      "fieldRenames": {
+        "title": "faqTitle"
+      },
+      "itemFieldRenames": {
+        "question": "faqQuestion",
+        "htmltext": "faqAnswer"
+      }
+    },
+    "featurecards": {
+      "resourceType": "iffcotokio/components/featurecards",
+      "itemFieldRenames": {
+        "htmltext": "cardText"
+      }
+    },
     "cardandrte": "iffcotokio/components/cardandrte",
     "cards-with-full-width": "iffcotokio/components/cardswithfullwidth",
     "teasercomponent": "iffcotokio/components/teaser"
