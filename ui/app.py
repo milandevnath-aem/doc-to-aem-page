@@ -10,9 +10,11 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from aem.package_generator.package import PackageMeta, build_package
 
 from aem_client.config import (
     load_page_type_config,
@@ -167,6 +169,26 @@ def show_run(request: Request, run_id: str):
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return templates.TemplateResponse(request, "result.html", {"run": record})
+
+
+@app.get("/runs/{run_id}/package.zip")
+def download_package(run_id: str):
+    record = get_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if record.aem_tree is None:
+        raise HTTPException(status_code=400,
+                            detail="No AEM node tree on this run; set a page-type config and re-run.")
+    meta = PackageMeta(
+        name=Path(record.filename).stem.lower().replace(" ", "-") or "content-package",
+        description=f"Generated from {record.filename}",
+    )
+    data = build_package(record.aem_tree, meta)
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{meta.name}.zip"'},
+    )
 
 
 @app.get("/history")

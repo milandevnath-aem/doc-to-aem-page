@@ -42,6 +42,10 @@
     </summary>
     <pre>{{ run.aem_tree | html_json(indent=2) }}</pre>
 </details>
+<p>
+    <a class="download-btn" href="/runs/{{ run.id }}/package.zip">⬇ Download AEM Package (.zip)</a>
+    <small>Install via AEM Package Manager on your local/lower env.</small>
+</p>
 {% else %}
 <p><em>No AEM node tree — set a page-type config on the home page then re-run.</em></p>
 {% endif %}

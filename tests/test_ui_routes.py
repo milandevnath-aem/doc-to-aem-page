@@ -380,6 +380,84 @@ def test_run_route_extracts_embedded_images_to_assets(tmp_path, monkeypatch):
     assert "image-1.png" in result_response.text
 
 
+def test_result_page_shows_download_package_link_when_tree_present():
+    from ui.service import RunResult
+    result = RunResult(
+        status="passed", filename="v3.docx", issues=[],
+        ncm={"format": "v3", "page": {"properties": {"title": "T"}}, "blocks": []},
+        aem_tree={"name": "t", "path": "/content/x/t",
+                  "primary_type": "cq:Page", "properties": {}, "children": []},
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert f'/runs/{run_id}/package.zip' in response.text
+    assert "Download AEM Package" in response.text
+
+
+def test_download_package_returns_installable_zip():
+    from ui.service import RunResult
+    result = RunResult(
+        status="passed", filename="Sample Doc.docx", issues=[],
+        ncm={"format": "v3", "page": {"properties": {"title": "Sample"}}, "blocks": []},
+        aem_tree={
+            "name": "sample", "path": "/content/site/en/articles/sample",
+            "primary_type": "cq:Page", "properties": {},
+            "children": [{
+                "name": "jcr:content", "primary_type": "cq:PageContent",
+                "properties": {"jcr:title": "Sample",
+                               "sling:resourceType": "site/components/page"},
+                "children": [],
+            }],
+        },
+    )
+    run_id = runs_module.save_run(result)
+
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}/package.zip")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment" in response.headers["content-disposition"]
+    # zip name derived from filename stem
+    assert "sample-doc" in response.headers["content-disposition"].lower()
+
+    import zipfile
+    from io import BytesIO
+    with zipfile.ZipFile(BytesIO(response.content)) as zf:
+        names = set(zf.namelist())
+        assert "META-INF/vault/filter.xml" in names
+        assert "META-INF/vault/properties.xml" in names
+        assert "jcr_root/content/site/en/articles/sample/.content.xml" in names
+        page_xml = zf.read(
+            "jcr_root/content/site/en/articles/sample/.content.xml"
+        ).decode()
+    assert 'jcr:primaryType="cq:Page"' in page_xml
+    assert 'jcr:title="Sample"' in page_xml
+
+
+def test_download_package_404_when_run_missing():
+    client = TestClient(app_module.app)
+    response = client.get("/runs/does-not-exist/package.zip")
+    assert response.status_code == 404
+
+
+def test_download_package_400_when_no_aem_tree():
+    from ui.service import RunResult
+    result = RunResult(
+        status="passed", filename="v3.docx", issues=[],
+        ncm={"format": "v3", "page": {"properties": {"title": "T"}}, "blocks": []},
+        aem_tree=None,
+    )
+    run_id = runs_module.save_run(result)
+    client = TestClient(app_module.app)
+    response = client.get(f"/runs/{run_id}/package.zip")
+    assert response.status_code == 400
+
+
 def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, monkeypatch):
     """End-to-end: upload a doc while the article sample config is active,
     result page must show the mapped AEM node tree with the target path."""
