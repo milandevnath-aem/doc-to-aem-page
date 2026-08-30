@@ -176,6 +176,33 @@ def test_component_mapping_dict_form_normalizes_and_survives_round_trip(tmp_path
     assert reloaded == cfg
 
 
+def test_page_and_container_resource_types_default_when_not_in_cf():
+    """Older CF payloads that don't declare the page/container resource
+    types keep working -- the config falls back to a sensible default
+    derived from the page type."""
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {},
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.page_resource_type == "article/components/page"
+    assert cfg.container_resource_type == "article/components/container"
+
+
+def test_page_and_container_resource_types_from_cf():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {},
+        "pageResourceType": "iffcotokio/components/page",
+        "containerResourceType": "iffcotokio/components/parsys",
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.page_resource_type == "iffcotokio/components/page"
+    assert cfg.container_resource_type == "iffcotokio/components/parsys"
+
+
 def test_component_mapping_dict_missing_resource_type_raises():
     raw = {
         "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",

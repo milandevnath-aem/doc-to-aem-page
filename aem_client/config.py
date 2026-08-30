@@ -44,6 +44,13 @@ class PageTypeConfig:
     dam_root: str             # DAM folder for pages of this type
     page_name_strategy: str   # slug_from_meta_title | slug_from_url | docx_filename
     component_mappings: dict[str, str]  # NCM component name -> sling:resourceType
+    # sling:resourceType for the jcr:content node and the responsive-grid
+    # container under it. Defaults derive from the page type only when the
+    # CF does not carry them, and only exist so an old CF payload keeps
+    # working -- real installs need these declared explicitly to point at
+    # the actual AEM page + parsys components.
+    page_resource_type: str = ""
+    container_resource_type: str = ""
 
     # ----- camelCase / JCR-key input from AEM CF -> snake_case fields ----
     _RENAME = {
@@ -52,7 +59,15 @@ class PageTypeConfig:
         "damRoot": "dam_root",
         "pageNameStrategy": "page_name_strategy",
         "componentMappings": "component_mappings",
+        "pageResourceType": "page_resource_type",
+        "containerResourceType": "container_resource_type",
     }
+
+    def __post_init__(self):
+        if not self.page_resource_type:
+            self.page_resource_type = f"{self.type}/components/page"
+        if not self.container_resource_type:
+            self.container_resource_type = f"{self.type}/components/container"
 
     @classmethod
     def from_dict(cls, raw: dict) -> "PageTypeConfig":

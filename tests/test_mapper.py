@@ -312,6 +312,45 @@ def test_map_item_field_renames_apply_to_faq_and_featurecard_items():
     assert "text" not in item["properties"]
 
 
+def test_map_uses_configured_page_and_container_resource_types():
+    cfg = _article_config()
+    cfg.page_resource_type = "iffcotokio/components/page"
+    cfg.container_resource_type = "iffcotokio/components/parsys"
+    tree = map_ncm_to_node_tree(_ncm(), cfg)
+    jcr = tree["children"][0]
+    assert jcr["properties"]["sling:resourceType"] == "iffcotokio/components/page"
+    root = jcr["children"][0]
+    assert root["properties"]["sling:resourceType"] == "iffcotokio/components/parsys"
+
+
+def test_map_strips_whitespace_from_component_resource_type():
+    """Operator-entered configs can accidentally carry leading/trailing
+    whitespace. Strip it -- AEM will not resolve a resource type that
+    starts with 14 spaces."""
+    cfg = _article_config()
+    cfg.component_mappings["page-description"] = "   iffcotokio/components/text   "
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "page-description", "variant": None,
+        "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None,
+    }])
+    text = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    assert text["properties"]["sling:resourceType"] == "iffcotokio/components/text"
+
+
+def test_map_strips_whitespace_from_nested_component_resource_type():
+    cfg = _article_config()
+    cfg.component_mappings["page-description"] = {
+        "resourceType": "  iffcotokio/components/text  ",
+        "fieldRenames": {},
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "page-description", "variant": None,
+        "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None,
+    }])
+    text = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    assert text["properties"]["sling:resourceType"] == "iffcotokio/components/text"
+
+
 def test_map_string_form_component_mapping_still_defaults_to_text_plus_isrich():
     """Simple string form -- when htmltext is NOT overridden, it maps to
     text + textIsRich=true (unchanged behavior)."""

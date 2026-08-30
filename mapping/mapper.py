@@ -77,7 +77,7 @@ def _pick_page_name(ncm: dict, cfg: PageTypeConfig) -> str:
 
 def _build_jcr_content(ncm: dict, cfg: PageTypeConfig) -> dict:
     props: dict = {
-        "sling:resourceType": f"{cfg.type}/components/page",
+        "sling:resourceType": cfg.page_resource_type.strip(),
         "cq:template": cfg.template_path,
     }
     # meta fields (skip empty -- template defaults win, no accidental overwrites)
@@ -97,7 +97,7 @@ def _build_root_container(ncm: dict, cfg: PageTypeConfig) -> dict:
     return {
         "name": "root",
         "primary_type": "nt:unstructured",
-        "properties": {"sling:resourceType": f"{cfg.type}/components/container"},
+        "properties": {"sling:resourceType": cfg.container_resource_type.strip()},
         "children": [_build_component(block, i, cfg)
                      for i, block in enumerate(ncm.get("blocks", []))],
     }
@@ -137,12 +137,14 @@ def _build_item(item: dict, index: int, cfg: PageTypeConfig, renames: dict) -> d
 def _entry_shape(entry, source_name: str) -> tuple[str, dict, dict]:
     """Unpack a component_mappings value into (resourceType, fieldRenames,
     itemFieldRenames). Accepts both the bare-string form and the nested-dict
-    form -- see docs/superpowers/specs for the CF shape."""
+    form. Resource types are stripped of surrounding whitespace so a
+    stray copy-paste in the CF or operator form cannot silently ship an
+    unresolvable resource type to AEM."""
     if isinstance(entry, str):
-        return entry, {}, {}
+        return entry.strip(), {}, {}
     if isinstance(entry, dict):
         return (
-            entry.get("resourceType", source_name),
+            (entry.get("resourceType") or source_name).strip(),
             entry.get("fieldRenames") or {},
             entry.get("itemFieldRenames") or {},
         )

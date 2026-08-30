@@ -3,6 +3,8 @@
   "templatePath": "/conf/iffcotokio/settings/wcm/templates/article",
   "contentRoot": "/content/iffcotokio/en/articles",
   "damRoot": "/content/dam/iffcotokio/articles",
+  "pageResourceType": "iffcotokio/components/page",
+  "containerResourceType": "iffcotokio/components/parsys",
   "pageNameStrategy": "slug_from_meta_title",
   "componentMappings": {
     "hero-banner": {
