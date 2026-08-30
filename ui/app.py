@@ -92,8 +92,18 @@ def save_site(
     auth_token_env: str = Form("AEM_AUTH_TOKEN"),
     article_cf_path: str = Form(""),
 ):
-    """Persist operator-facing settings from the home-page form."""
-    cf_paths = {"article": article_cf_path} if article_cf_path else {}
+    """Persist operator-facing settings from the home-page form.
+
+    Preserves cf_paths entries for other page types -- form only edits the
+    article path; a blog/category config the operator set from an earlier
+    save survives the round-trip.
+    """
+    current = load_site_config(SITE_CONFIG_PATH)
+    cf_paths = dict(current.cf_paths)  # keep other page types intact
+    if article_cf_path:
+        cf_paths["article"] = article_cf_path.strip()
+    else:
+        cf_paths.pop("article", None)
     cfg = SiteConfig(
         aem_base_url=aem_base_url.strip(),
         active_page_type=active_page_type.strip(),

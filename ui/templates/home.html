@@ -50,6 +50,9 @@
         <p><strong>Template path:</strong> <code>{{ active_config.template_path }}</code></p>
         <p><strong>Content root:</strong> <code>{{ active_config.content_root }}</code></p>
         <p><strong>DAM root:</strong> <code>{{ active_config.dam_root }}</code></p>
+        <p><strong>Page resource type:</strong> <code>{{ active_config.page_resource_type }}</code></p>
+        <p><strong>Container resource type:</strong> <code>{{ active_config.container_resource_type }}</code></p>
+        <p><strong>Page-name strategy:</strong> <code>{{ active_config.page_name_strategy }}</code></p>
         <p><strong>Component mappings ({{ active_config.component_mappings | length }}):</strong></p>
         <ul>
         {% for source, entry in active_config.component_mappings.items() %}

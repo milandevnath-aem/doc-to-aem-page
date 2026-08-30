@@ -61,6 +61,61 @@ def test_load_sample_route_writes_page_type_cache(tmp_path, monkeypatch):
     assert 'iffcotokio/components/text' in text  # from the bundled sample
 
 
+def test_home_page_shows_page_and_container_resource_types():
+    """The two AEM-side resource types must be visible on the home page so
+    operators can verify what AEM will resolve at install time."""
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    text = response.text
+    assert "Page resource type" in text
+    assert "Container resource type" in text
+    # sample article config values from the bundled sample
+    assert "iffcotokio/components/page" in text
+    assert "iffcotokio/components/parsys" in text
+    assert "slug_from_meta_title" in text
+
+
+def test_save_site_config_preserves_other_page_types(tmp_path, monkeypatch):
+    """Saving the form only touches the article CF path -- an already-saved
+    blog/category entry must survive the round trip."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    site_path = cache_dir / "site.json"
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", site_path)
+
+    # seed a site config with two page types already configured
+    from aem_client.config import SiteConfig, save_site_config
+    save_site_config(SiteConfig(
+        aem_base_url="http://localhost:4502",
+        active_page_type="article",
+        auth_token_env="AEM_AUTH_TOKEN",
+        cf_paths={
+            "article": "/content/dam/x/article-old",
+            "blog": "/content/dam/x/blog",   # must survive
+        },
+    ), site_path)
+
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/config/site",
+        data={
+            "aem_base_url": "http://localhost:4502",
+            "active_page_type": "article",
+            "auth_token_env": "AEM_AUTH_TOKEN",
+            "article_cf_path": "/content/dam/x/article-new",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    from aem_client.config import load_site_config
+    reloaded = load_site_config(site_path)
+    assert reloaded.cf_paths["article"] == "/content/dam/x/article-new"
+    assert reloaded.cf_paths["blog"] == "/content/dam/x/blog"
+
+
 def test_home_page_reflects_saved_site_config(tmp_path, monkeypatch):
     cache_dir = tmp_path / "cache"
     monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
