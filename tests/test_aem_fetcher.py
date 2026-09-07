@@ -190,6 +190,64 @@ def test_fetch_raises_when_config_field_is_malformed_json_string():
     assert "config" in str(excinfo.value).lower()
 
 
+def test_fetch_or_cached_also_pulls_template_initial_content(tmp_path):
+    """After fetching the CF, `fetch_or_cached` also GETs the template's
+    initial jcr:content and stores the converted node tree on the config
+    so the mapper can use it as the layout base."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    seen_urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        seen_urls.append(url)
+        if url.endswith("/jcr:content/data/master.json"):
+            return httpx.Response(200, json=CF_PAYLOAD)
+        if url.endswith("/initial/jcr:content.infinity.json"):
+            return httpx.Response(200, json={
+                "jcr:primaryType": "cq:PageContent",
+                "sling:resourceType": "site/components/page",
+                "root": {
+                    "jcr:primaryType": "nt:unstructured",
+                    "sling:resourceType": "wcm/foundation/components/responsivegrid",
+                },
+            })
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_or_cached(
+            client, "http://localhost:5402",
+            "/content/dam/x/article", cache_path,
+        )
+    # both URLs hit
+    assert any(u.endswith("/data/master.json") for u in seen_urls)
+    assert any(u.endswith("/initial/jcr:content.infinity.json") for u in seen_urls)
+    # template stored on the config in converted-tree shape
+    assert cfg.template_initial_content["name"] == "jcr:content"
+    root = next(c for c in cfg.template_initial_content["children"] if c["name"] == "root")
+    assert root["properties"]["sling:resourceType"] == "wcm/foundation/components/responsivegrid"
+
+
+def test_fetch_or_cached_survives_template_fetch_failure(tmp_path):
+    """CF fetches fine but template endpoint 404s -- fall back to no
+    template, don't kill the whole pipeline."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url).endswith("/jcr:content/data/master.json"):
+            return httpx.Response(200, json=CF_PAYLOAD)
+        return httpx.Response(404)  # template endpoint
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_or_cached(
+            client, "http://localhost:5402",
+            "/content/dam/x/article", cache_path,
+        )
+    assert cfg.type == "article"
+    assert cfg.template_initial_content == {}
+
+
 def test_fetch_or_cached_raises_when_no_network_and_no_cache(tmp_path):
     cache_path = tmp_path / "article.pagetypeconfig.json"
     transport = _mock_transport(err=httpx.ConnectError)

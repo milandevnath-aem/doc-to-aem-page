@@ -96,12 +96,53 @@ def fetch_or_cached(
     auth_token: str | None = None,
 ) -> PageTypeConfig:
     """Try live AEM first, cache on success, fall back to cache on failure.
-    Raise FetchError only if neither AEM nor a cache is available."""
+    Raise FetchError only if neither AEM nor a cache is available.
+
+    When the fetch succeeds AND the CF declares a templatePath, also pulls
+    the template's initial jcr:content tree so the mapper can use it as
+    the layout base. Template-fetch failure is non-fatal -- pipeline just
+    falls back to the flat-layout mapper on that run.
+    """
     try:
         cfg = fetch_page_type_config(client, base_url, cf_path, auth_token)
     except FetchError:
         if cache_path.exists():
             return load_page_type_config(cache_path)
         raise
+    if cfg.template_path:
+        try:
+            cfg.template_initial_content = fetch_template_initial(
+                client, base_url, cfg.template_path, auth_token,
+            )
+        except FetchError:
+            # keep going without template; mapper falls back to flat layout
+            cfg.template_initial_content = {}
     save_page_type_config(cfg, cache_path)
     return cfg
+
+
+def fetch_template_initial(
+    client: httpx.Client,
+    base_url: str,
+    template_path: str,
+    auth_token: str | None = None,
+) -> dict:
+    """Fetch <template>/initial/jcr:content.infinity.json and convert to
+    the internal node-tree shape. Used as the layout base for pages
+    generated from a template that ships default children."""
+    from mapping.template_convert import aem_json_to_node
+    base = base_url.rstrip("/")
+    path = template_path if template_path.startswith("/") else f"/{template_path}"
+    url = f"{base}{path}/initial/jcr:content.infinity.json"
+    headers = {"authorization": auth_token} if auth_token else None
+    try:
+        response = client.get(url, headers=headers, timeout=10.0)
+    except httpx.HTTPError as exc:
+        raise FetchError(f"AEM template fetch failed: {exc}") from exc
+    if response.status_code != 200:
+        raise FetchError(f"AEM returned {response.status_code} for {url}")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise FetchError(f"AEM template response was not JSON: {exc}") from exc
+    return aem_json_to_node("jcr:content", payload)

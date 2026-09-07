@@ -51,6 +51,18 @@ class PageTypeConfig:
     # the actual AEM page + parsys components.
     page_resource_type: str = ""
     container_resource_type: str = ""
+    # Where each NCM component slots into the template tree. Path is
+    # relative to jcr:content (e.g. "root/responsivegrid/right_par/page_description").
+    # When template_initial_content is present, the mapper walks this
+    # map to place NCM blocks; without it, it falls back to the flat
+    # "everything under root/" layout.
+    component_slots: dict[str, str] = field(default_factory=dict)
+    # Cached template initial-content tree, as fetched from AEM via
+    # <templatePath>/initial/jcr:content.infinity.json. Structure matches
+    # the internal node-tree shape (name/primary_type/properties/children).
+    # Empty dict when no template has been fetched -- mapper then falls
+    # back to flat-layout mode.
+    template_initial_content: dict = field(default_factory=dict)
 
     # ----- camelCase / JCR-key input from AEM CF -> snake_case fields ----
     _RENAME = {
@@ -61,6 +73,8 @@ class PageTypeConfig:
         "componentMappings": "component_mappings",
         "pageResourceType": "page_resource_type",
         "containerResourceType": "container_resource_type",
+        "componentSlots": "component_slots",
+        "templateInitialContent": "template_initial_content",
     }
 
     def __post_init__(self):

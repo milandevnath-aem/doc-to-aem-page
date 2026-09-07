@@ -190,6 +190,32 @@ def test_page_and_container_resource_types_default_when_not_in_cf():
     assert cfg.container_resource_type == "article/components/container"
 
 
+def test_component_slots_and_template_initial_survive_round_trip(tmp_path):
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {},
+        "componentSlots": {
+            "page-description": "root/responsivegrid/right_par/page_description",
+        },
+        "templateInitialContent": {
+            "name": "jcr:content", "primary_type": "cq:PageContent",
+            "properties": {"sling:resourceType": "site/components/page"},
+            "children": [],
+        },
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.component_slots == {
+        "page-description": "root/responsivegrid/right_par/page_description"
+    }
+    assert cfg.template_initial_content["name"] == "jcr:content"
+
+    path = tmp_path / "cfg.json"
+    save_page_type_config(cfg, path)
+    reloaded = load_page_type_config(path)
+    assert reloaded == cfg
+
+
 def test_page_and_container_resource_types_from_cf():
     raw = {
         "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",

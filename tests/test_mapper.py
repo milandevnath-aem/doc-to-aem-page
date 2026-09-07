@@ -440,6 +440,126 @@ def test_map_string_form_component_mapping_still_defaults_to_text_plus_isrich():
     assert text["properties"]["textIsRich"] == "true"
 
 
+def _tpl_initial():
+    """Minimal template initial tree matching the client's article template."""
+    return {
+        "name": "jcr:content",
+        "primary_type": "cq:PageContent",
+        "properties": {"sling:resourceType": "iffcotokio/components/structure/page"},
+        "children": [{
+            "name": "root",
+            "primary_type": "nt:unstructured",
+            "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+            "children": [
+                {"name": "responsivegrid_1616964146", "primary_type": "nt:unstructured",
+                 "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+                 "children": []},
+                {"name": "responsivegrid", "primary_type": "nt:unstructured",
+                 "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+                 "children": [
+                     {"name": "new_hero_banner", "primary_type": "nt:unstructured",
+                      "properties": {
+                          "sling:resourceType": "site/components/hero",
+                          "bannerTitle": "Template Default Title",
+                      }, "children": []},
+                     {"name": "right_par", "primary_type": "nt:unstructured",
+                      "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+                      "children": []},
+                 ]},
+            ],
+        }],
+    }
+
+
+def test_template_overlay_uses_template_tree_as_base(tmp_path):
+    """When template_initial_content is set, the tree matches the template
+    layout instead of the flat root/<component>_<index> layout."""
+    cfg = _article_config()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    ncm = _ncm(blocks=[
+        {"type": "component", "name": "page-description", "variant": None,
+         "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None},
+    ])
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    jcr = tree["children"][0]
+    root = next(c for c in jcr["children"] if c["name"] == "root")
+    # template's static nodes preserved
+    assert any(c["name"] == "responsivegrid_1616964146" for c in root["children"])
+    grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
+    # hero banner still at its template-supplied default (no NCM hero-banner block)
+    hero = next(c for c in grid["children"] if c["name"] == "new_hero_banner")
+    assert hero["properties"]["bannerTitle"] == "Template Default Title"
+    # our page_description was placed at the slot path
+    right_par = next(c for c in grid["children"] if c["name"] == "right_par")
+    page_desc = next(c for c in right_par["children"] if c["name"] == "page_description")
+    assert page_desc["properties"]["sling:resourceType"] == "iffcotokio/components/text"
+    assert page_desc["properties"]["text"] == "<p>x</p>"
+
+
+def test_template_overlay_extra_blocks_go_as_siblings_of_the_slot():
+    """Multiple NCM blocks of the same source name -- first fills the slot
+    node, extras become siblings under the same parent with _1, _2, ..."""
+    cfg = _article_config()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    ncm = _ncm(blocks=[
+        {"type": "component", "name": "page-description", "variant": None,
+         "fields": {"htmltext": "<p>one</p>"}, "items": [], "table": None},
+        {"type": "component", "name": "page-description", "variant": None,
+         "fields": {"htmltext": "<p>two</p>"}, "items": [], "table": None},
+        {"type": "component", "name": "page-description", "variant": None,
+         "fields": {"htmltext": "<p>three</p>"}, "items": [], "table": None},
+    ])
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    right_par = tree["children"][0]["children"][0]["children"][1]["children"][1]
+    assert right_par["name"] == "right_par"
+    names = [c["name"] for c in right_par["children"]]
+    assert names == ["page_description", "page_description_1", "page_description_2"]
+    texts = [c["properties"]["text"] for c in right_par["children"]]
+    assert texts == ["<p>one</p>", "<p>two</p>", "<p>three</p>"]
+
+
+def test_template_overlay_unmatched_blocks_stay_visible_under_slot_parent():
+    """A block without a componentSlot mapping is placed at the same
+    fallback location (the slot's parent) with a __mapping_gap marker so
+    content never silently vanishes."""
+    cfg = _article_config()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    ncm = _ncm(blocks=[
+        {"type": "component", "name": "faq", "variant": None,
+         "fields": {"title": "FAQS"}, "items": [], "table": None},
+    ])
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    right_par = tree["children"][0]["children"][0]["children"][1]["children"][1]
+    faq_nodes = [c for c in right_par["children"] if c["name"].startswith("faq")]
+    assert len(faq_nodes) == 1
+    # __mapping_gap flags the miss so operators see it in the emitted node
+    assert faq_nodes[0]["properties"].get("__mapping_gap") == "faq"
+
+
+def test_template_overlay_missing_falls_back_to_flat_layout():
+    """No template_initial_content -> today's flat behavior. Backward-compat."""
+    cfg = _article_config()
+    cfg.template_initial_content = {}   # no template
+    ncm = _ncm(blocks=[
+        {"type": "component", "name": "page-description", "variant": None,
+         "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None},
+    ])
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    root = tree["children"][0]["children"][0]
+    assert root["name"] == "root"
+    # flat mode: direct child of root, named <source>_<index>
+    assert root["children"][0]["name"] == "page-description_0"
+
+
 def test_map_full_v3_shape_end_to_end():
     """One NCM shaped like the real v3 client doc all the way through --
     smoke check that the tree is deep, ordered, and doesn't lose blocks."""

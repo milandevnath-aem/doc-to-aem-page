@@ -22,6 +22,7 @@ different names (metaTitle, cq:seoTitle, etc.) will get an override map in
 PageTypeConfig later. YAGNI for now.
 """
 
+import copy
 from pathlib import Path
 
 from aem_client.config import PageTypeConfig
@@ -53,7 +54,10 @@ _FIELD_RENAMES = {
 def map_ncm_to_node_tree(ncm: dict, cfg: PageTypeConfig) -> dict:
     page_name = _pick_page_name(ncm, cfg)
     page_path = f"{cfg.content_root.rstrip('/')}/{page_name}"
-    jcr_content = _build_jcr_content(ncm, cfg)
+    if cfg.template_initial_content:
+        jcr_content = _build_jcr_content_from_template(ncm, cfg)
+    else:
+        jcr_content = _build_jcr_content(ncm, cfg)
     return {
         "name": page_name,
         "path": page_path,
@@ -210,3 +214,104 @@ def _image_to_file_reference(image: dict, cfg: PageTypeConfig) -> str:
     if not name:
         return ""
     return f"{cfg.dam_root.rstrip('/')}/{name}"
+
+
+# ---------- template overlay mode ----------
+#
+# When PageTypeConfig.template_initial_content is set, the mapper uses that
+# tree as the layout base -- component_slots names where each NCM block
+# goes. Static template children (hero banner defaults, split containers,
+# etc.) are preserved verbatim. Extra NCM blocks that overflow a slot land
+# as siblings of the slot node; blocks with no slot at all fall back to
+# the slot parent so nothing silently vanishes.
+
+
+def _build_jcr_content_from_template(ncm: dict, cfg: PageTypeConfig) -> dict:
+    # deep-copy the template so per-run overlays don't mutate the config
+    jcr_content = copy.deepcopy(cfg.template_initial_content)
+    # apply page-level properties (meta title, description, etc.) onto
+    # jcr:content, mirroring the flat-mode build
+    props = jcr_content["properties"]
+    props["cq:template"] = cfg.template_path
+    for source_key, jcr_key in _PAGE_PROPERTY_MAP.items():
+        value = ncm["page"]["properties"].get(source_key, "")
+        if value:
+            props[jcr_key] = value
+
+    slots = cfg.component_slots or {}
+    # slot_parents keyed by parent-path so overflow siblings land right
+    overflow_counters: dict[str, int] = {}
+
+    for block in ncm.get("blocks", []):
+        source_name = block["name"]
+        slot_path = slots.get(source_name)
+        if slot_path:
+            slot_parts = slot_path.split("/")
+            parent = _find_or_create_parent(jcr_content, slot_parts[:-1])
+            leaf_name = slot_parts[-1]
+            overflow_counters.setdefault(slot_path, 0)
+            counter = overflow_counters[slot_path]
+            existing = _find_child(parent, leaf_name)
+            if counter == 0 and existing is not None:
+                _merge_block_into_node(existing, block, cfg)
+            else:
+                node = _build_component(block, counter, cfg)
+                node["name"] = leaf_name if counter == 0 else f"{leaf_name}_{counter}"
+                parent["children"].append(node)
+            overflow_counters[slot_path] += 1
+        else:
+            # No slot at all -- fall back to the "first slot parent" as
+            # a visible catch-all so the operator sees the miss.
+            fallback_parent = _pick_fallback_parent(jcr_content, slots)
+            node = _build_component(block, len(fallback_parent["children"]), cfg)
+            node["properties"]["__mapping_gap"] = source_name
+            fallback_parent["children"].append(node)
+    return jcr_content
+
+
+def _find_child(node: dict, name: str) -> dict | None:
+    for c in node["children"]:
+        if c["name"] == name:
+            return c
+    return None
+
+
+def _find_or_create_parent(root: dict, parts: list[str]) -> dict:
+    """Walk `root` following `parts` (relative to jcr:content), creating
+    plain nt:unstructured containers for any missing segment."""
+    node = root
+    for name in parts:
+        child = _find_child(node, name)
+        if child is None:
+            child = {"name": name, "primary_type": "nt:unstructured",
+                     "properties": {}, "children": []}
+            node["children"].append(child)
+        node = child
+    return node
+
+
+def _merge_block_into_node(node: dict, block: dict, cfg: PageTypeConfig) -> None:
+    """Overlay NCM block properties onto an existing template node -- NCM
+    values win, template defaults preserved for keys the NCM does not
+    supply. Used when a slot points at a node already present in the
+    fetched template initial (e.g. new_hero_banner with default title)."""
+    source_name = block["name"]
+    entry = cfg.component_mappings.get(source_name)
+    shape = _entry_shape(entry, source_name)
+    field_props = _map_fields(block.get("fields", {}), cfg, shape["fieldRenames"])
+    for k, v in shape["staticProperties"].items():
+        field_props.setdefault(k, v)
+    node["properties"].update(field_props)
+    # only overwrite sling:resourceType when the mapping explicitly declares one
+    if entry is not None:
+        node["properties"]["sling:resourceType"] = shape["resourceType"]
+
+
+def _pick_fallback_parent(jcr_content: dict, slots: dict) -> dict:
+    """When an NCM block has no slot, put it under the parent of the first
+    configured slot so unmapped content stays visible near where it likely
+    belongs. Falls back to jcr:content root if no slots configured."""
+    for slot_path in slots.values():
+        parts = slot_path.split("/")
+        return _find_or_create_parent(jcr_content, parts[:-1])
+    return jcr_content
