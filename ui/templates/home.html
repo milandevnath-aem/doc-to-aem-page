@@ -22,11 +22,17 @@
                    value="{{ site.active_page_type }}" required>
         </p>
         <p>
-            <label for="auth_token_env">Auth token env-var name</label><br>
+            <label for="auth_token_env">Auth token env-var name (e.g. <code>AEM_AUTH_TOKEN</code>)</label><br>
             <input type="text" id="auth_token_env" name="auth_token_env"
-                   value="{{ site.auth_token_env }}">
-            <br><small>Never stored in the form; read from
-                <code>os.environ[&lt;this&gt;]</code> at fetch time.</small>
+                   value="{{ site.auth_token_env }}"
+                   pattern="[A-Za-z_][A-Za-z0-9_]*"
+                   title="Env-var name only (letters/digits/underscore). NOT the token value.">
+            <br><small>Env-var NAME only, not the token value.
+                The actual token is read from
+                <code>os.environ[&lt;this&gt;]</code> at fetch time. For local dev:
+                <br>PowerShell — <code>$env:AEM_AUTH_TOKEN = "Basic YWRtaW46YWRtaW4="</code>
+                <br>Bash — <code>export AEM_AUTH_TOKEN="Basic YWRtaW46YWRtaW4="</code>
+            </small>
         </p>
         <p>
             <label for="article_cf_path">Article Content Fragment path</label><br>

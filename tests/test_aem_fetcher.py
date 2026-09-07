@@ -138,6 +138,58 @@ def test_fetch_or_cached_falls_back_to_cache_on_network_failure(tmp_path):
     assert cfg.type == "article"
 
 
+def test_fetch_unwraps_config_field_when_dict():
+    """Real AEM CFs authored with a single JSON Object field named
+    `config` return that object wrapped under `config` in the payload."""
+    wrapped = {
+        "jcr:primaryType": "nt:unstructured",
+        "config": CF_PAYLOAD,
+    }
+    transport = _mock_transport(200, wrapped)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_page_type_config(
+            client, "http://localhost:5402",
+            "/content/dam/x/article-page-config",
+        )
+    assert cfg.type == "article"
+    assert cfg.template_path == "/conf/iffcotokio/settings/wcm/templates/article"
+
+
+def test_fetch_unwraps_config_field_when_json_string():
+    """AEM 6.5 serializes CF JSON Object fields as escaped JSON strings on
+    the wire, not as embedded objects. The fetcher must json.loads() them
+    before handing to PageTypeConfig.from_dict()."""
+    import json as _json
+    wrapped = {
+        "jcr:primaryType": "nt:unstructured",
+        "config": _json.dumps(CF_PAYLOAD),   # string, not dict
+        "config@LastModified": "Tue Sep 08 2026 00:20:23 GMT+0530",
+    }
+    transport = _mock_transport(200, wrapped)
+    with httpx.Client(transport=transport) as client:
+        cfg = fetch_page_type_config(
+            client, "http://localhost:5402",
+            "/content/dam/x/article-page-config",
+        )
+    assert cfg.type == "article"
+    assert cfg.component_mappings["faq"] == "iffcotokio/components/faq"
+
+
+def test_fetch_raises_when_config_field_is_malformed_json_string():
+    wrapped = {
+        "jcr:primaryType": "nt:unstructured",
+        "config": "not valid json {",
+    }
+    transport = _mock_transport(200, wrapped)
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(FetchError) as excinfo:
+            fetch_page_type_config(
+                client, "http://localhost:5402",
+                "/content/dam/x/article-page-config",
+            )
+    assert "config" in str(excinfo.value).lower()
+
+
 def test_fetch_or_cached_raises_when_no_network_and_no_cache(tmp_path):
     cache_path = tmp_path / "article.pagetypeconfig.json"
     transport = _mock_transport(err=httpx.ConnectError)

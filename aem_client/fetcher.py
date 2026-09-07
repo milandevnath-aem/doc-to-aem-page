@@ -12,6 +12,8 @@ fall back to the on-disk cache if AEM is unreachable, raise only when
 neither is available.
 """
 
+import json
+
 import httpx
 
 from aem_client.config import (
@@ -19,6 +21,12 @@ from aem_client.config import (
     load_page_type_config,
     save_page_type_config,
 )
+
+# CF Model uses one JSON Object field named `config` that wraps the whole
+# PageTypeConfig JSON. AEM 6.5 serializes JSON Object fields as escaped
+# JSON strings on the wire; other versions may return an embedded object.
+# Accept both.
+_WRAPPER_FIELD = "config"
 
 
 class FetchError(RuntimeError):
@@ -51,10 +59,33 @@ def fetch_page_type_config(
         payload = response.json()
     except ValueError as exc:
         raise FetchError(f"AEM response was not JSON: {exc}") from exc
+    payload = _unwrap_config(payload)
     try:
         return PageTypeConfig.from_dict(payload)
     except KeyError as exc:
         raise FetchError(f"AEM CF payload missing required field: {exc}") from exc
+
+
+def _unwrap_config(payload: dict) -> dict:
+    """Real CFs authored with one JSON Object field named `config` return
+    that object wrapped. AEM 6.5 serializes JSON Object as an escaped
+    JSON string; other versions embed the dict directly. Handle both, or
+    fall through to the flat-field payload used by our sample CFs."""
+    if _WRAPPER_FIELD not in payload:
+        return payload
+    inner = payload[_WRAPPER_FIELD]
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except json.JSONDecodeError as exc:
+            raise FetchError(
+                f"AEM CF '{_WRAPPER_FIELD}' field is not valid JSON: {exc}"
+            ) from exc
+    if not isinstance(inner, dict):
+        raise FetchError(
+            f"AEM CF '{_WRAPPER_FIELD}' field must be an object or JSON string"
+        )
+    return inner
 
 
 def fetch_or_cached(
