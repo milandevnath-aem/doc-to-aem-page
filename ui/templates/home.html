@@ -77,6 +77,16 @@
                         {% for k, v in entry.itemFieldRenames.items() %}<code>{{ k }}</code>→<code>{{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
                         </small>
                     {% endif %}
+                    {% if entry.staticProperties %}
+                        <br><small>&nbsp;&nbsp;static:
+                        {% for k, v in entry.staticProperties.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                        </small>
+                    {% endif %}
+                    {% if entry.itemStaticProperties %}
+                        <br><small>&nbsp;&nbsp;item static:
+                        {% for k, v in entry.itemStaticProperties.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                        </small>
+                    {% endif %}
                 {% endif %}
             </li>
         {% endfor %}
