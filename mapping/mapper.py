@@ -106,10 +106,13 @@ def _build_root_container(ncm: dict, cfg: PageTypeConfig) -> dict:
 def _build_component(block: dict, index: int, cfg: PageTypeConfig) -> dict:
     source_name = block["name"]
     entry = cfg.component_mappings.get(source_name)
-    resource_type, comp_renames, item_renames = _entry_shape(entry, source_name)
-    props = _map_fields(block.get("fields", {}), cfg, comp_renames)
+    shape = _entry_shape(entry, source_name)
+    props = _map_fields(block.get("fields", {}), cfg, shape["fieldRenames"])
+    # merge static properties AFTER field renames so NCM-supplied values win
+    for k, v in shape["staticProperties"].items():
+        props.setdefault(k, v)
     if entry is not None:
-        props["sling:resourceType"] = resource_type
+        props["sling:resourceType"] = shape["resourceType"]
     else:
         # No mapping in the CF -- keep the block visible with a
         # __mapping_gap marker so the operator sees the miss instead of
@@ -120,36 +123,48 @@ def _build_component(block: dict, index: int, cfg: PageTypeConfig) -> dict:
         "name": f"{source_name}_{index}",
         "primary_type": "nt:unstructured",
         "properties": props,
-        "children": [_build_item(item, i, cfg, item_renames)
+        "children": [_build_item(item, i, cfg, shape["itemFieldRenames"],
+                                 shape["itemStaticProperties"])
                      for i, item in enumerate(block.get("items", []))],
     }
 
 
-def _build_item(item: dict, index: int, cfg: PageTypeConfig, renames: dict) -> dict:
+def _build_item(item: dict, index: int, cfg: PageTypeConfig,
+                renames: dict, statics: dict) -> dict:
+    props = _map_fields(item.get("fields", {}), cfg, renames)
+    for k, v in statics.items():
+        props.setdefault(k, v)
     return {
         "name": f"item_{index}",
         "primary_type": "nt:unstructured",
-        "properties": _map_fields(item.get("fields", {}), cfg, renames),
+        "properties": props,
         "children": [],
     }
 
 
-def _entry_shape(entry, source_name: str) -> tuple[str, dict, dict]:
-    """Unpack a component_mappings value into (resourceType, fieldRenames,
-    itemFieldRenames). Accepts both the bare-string form and the nested-dict
-    form. Resource types are stripped of surrounding whitespace so a
-    stray copy-paste in the CF or operator form cannot silently ship an
-    unresolvable resource type to AEM."""
+def _entry_shape(entry, source_name: str) -> dict:
+    """Unpack a component_mappings value into a normalized dict with
+    resourceType, fieldRenames, itemFieldRenames, staticProperties,
+    and itemStaticProperties. Accepts both the bare-string form and the
+    nested-dict form. Resource types are stripped of surrounding
+    whitespace so a stray copy-paste in the CF or operator form cannot
+    silently ship an unresolvable resource type to AEM."""
+    empty: dict = {}
     if isinstance(entry, str):
-        return entry.strip(), {}, {}
+        return {"resourceType": entry.strip(), "fieldRenames": empty,
+                "itemFieldRenames": empty, "staticProperties": empty,
+                "itemStaticProperties": empty}
     if isinstance(entry, dict):
-        return (
-            (entry.get("resourceType") or source_name).strip(),
-            entry.get("fieldRenames") or {},
-            entry.get("itemFieldRenames") or {},
-        )
-    # entry is None (unmapped) -- resourceType handled by caller with a gap marker
-    return source_name, {}, {}
+        return {
+            "resourceType": (entry.get("resourceType") or source_name).strip(),
+            "fieldRenames": entry.get("fieldRenames") or empty,
+            "itemFieldRenames": entry.get("itemFieldRenames") or empty,
+            "staticProperties": entry.get("staticProperties") or empty,
+            "itemStaticProperties": entry.get("itemStaticProperties") or empty,
+        }
+    return {"resourceType": source_name, "fieldRenames": empty,
+            "itemFieldRenames": empty, "staticProperties": empty,
+            "itemStaticProperties": empty}
 
 
 def _map_fields(fields: dict, cfg: PageTypeConfig, renames: dict | None = None) -> dict:

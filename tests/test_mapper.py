@@ -312,6 +312,83 @@ def test_map_item_field_renames_apply_to_faq_and_featurecard_items():
     assert "text" not in item["properties"]
 
 
+def test_map_emits_static_properties_on_component():
+    """Some AEM components need fixed properties every install regardless
+    of source content (enableContainer=true on a text component, cardAlign
+    default on a hero-banner, etc.). staticProperties on the mapping
+    entry declares them."""
+    cfg = _article_config()
+    cfg.component_mappings["page-description"] = {
+        "resourceType": "iffcotokio/components/content/page-description",
+        "fieldRenames": {"htmltext": "description"},
+        "staticProperties": {
+            "textIsRich": "true",
+            "enableContainer": "true",
+        },
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "page-description", "variant": None,
+        "fields": {"htmltext": "<p>x</p>"}, "items": [], "table": None,
+    }])
+    node = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    props = node["properties"]
+    assert props["description"] == "<p>x</p>"
+    assert props["textIsRich"] == "true"
+    assert props["enableContainer"] == "true"
+
+
+def test_map_static_properties_do_not_overwrite_ncm_supplied_values():
+    """A source doc that carries a real value for a property whose name
+    matches a static one wins -- static is only a DEFAULT."""
+    cfg = _article_config()
+    cfg.component_mappings["hero-banner"] = {
+        "resourceType": "iffcotokio/components/content/hero-banner-compnent/new-hero-banner",
+        "fieldRenames": {
+            "title": "bannerTitle",
+            "htmltext": "bannerDescription",
+        },
+        "staticProperties": {
+            "cardAlign": "left",
+            "imagePath": "/content/dam/iffcotokio/banner/default.png",
+        },
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "hero-banner", "variant": None,
+        "fields": {"title": "Hi", "htmltext": "<p>x</p>",
+                   "cardAlign": "right"},   # source overrides static
+        "items": [], "table": None,
+    }])
+    node = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]
+    props = node["properties"]
+    assert props["bannerTitle"] == "Hi"
+    assert props["bannerDescription"] == "<p>x</p>"
+    # NCM value overrides the static default
+    assert props["cardAlign"] == "right"
+    # static default kept when no NCM value collides
+    assert props["imagePath"] == "/content/dam/iffcotokio/banner/default.png"
+
+
+def test_map_static_properties_apply_per_item_via_itemStaticProperties():
+    cfg = _article_config()
+    cfg.component_mappings["faq"] = {
+        "resourceType": "iffcotokio/components/faq",
+        "itemFieldRenames": {"question": "faqQuestion", "htmltext": "faqAnswer"},
+        "itemStaticProperties": {"answerIsRich": "true"},
+    }
+    ncm = _ncm(blocks=[{
+        "type": "component", "name": "faq", "variant": None,
+        "fields": {"title": "FAQS"},
+        "items": [
+            {"id": None, "implicit": True,
+             "fields": {"question": "Q?", "htmltext": "<p>A</p>"}},
+        ], "table": None,
+    }])
+    item = map_ncm_to_node_tree(ncm, cfg)["children"][0]["children"][0]["children"][0]["children"][0]
+    assert item["properties"]["faqQuestion"] == "Q?"
+    assert item["properties"]["faqAnswer"] == "<p>A</p>"
+    assert item["properties"]["answerIsRich"] == "true"
+
+
 def test_map_uses_configured_page_and_container_resource_types():
     cfg = _article_config()
     cfg.page_resource_type = "iffcotokio/components/page"

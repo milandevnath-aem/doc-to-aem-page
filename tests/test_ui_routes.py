@@ -61,17 +61,24 @@ def test_load_sample_route_writes_page_type_cache(tmp_path, monkeypatch):
     assert 'iffcotokio/components/text' in text  # from the bundled sample
 
 
-def test_home_page_shows_page_and_container_resource_types():
+def test_home_page_shows_page_and_container_resource_types(tmp_path, monkeypatch):
     """The two AEM-side resource types must be visible on the home page so
-    operators can verify what AEM will resolve at install time."""
-    client = TestClient(app)
+    operators can verify what AEM will resolve at install time.
 
+    Uses an isolated cache dir so real fetched values on a dev box do not
+    make the assertion brittle -- we force the bundled sample to be the
+    active config for the test."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+
+    client = TestClient(app_module.app)
     response = client.get("/")
 
     text = response.text
     assert "Page resource type" in text
     assert "Container resource type" in text
-    # sample article config values from the bundled sample
+    # falls back to the bundled sample -- values from config/samples/article.pagetypeconfig.json
     assert "iffcotokio/components/page" in text
     assert "iffcotokio/components/parsys" in text
     assert "slug_from_meta_title" in text
@@ -515,7 +522,13 @@ def test_download_package_400_when_no_aem_tree():
 
 def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, monkeypatch):
     """End-to-end: upload a doc while the article sample config is active,
-    result page must show the mapped AEM node tree with the target path."""
+    result page must show the mapped AEM node tree with the target path.
+    Cache dir is isolated so real fetched values on the dev box do not
+    make the assertion brittle -- the pipeline falls back to the bundled
+    sample."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
     monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path / "uploads")
     (tmp_path / "uploads").mkdir()
 
