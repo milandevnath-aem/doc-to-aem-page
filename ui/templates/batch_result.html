@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Batch Run: {{ run.filename_top or run.id }}{% endblock %}
+{% block content %}
+<h1>Batch Run</h1>
+<p>Run at: {{ run.created_at }}</p>
+{% if run.filename_top %}
+<p><strong>Top folder:</strong> <code>{{ run.filename_top }}</code></p>
+{% endif %}
+
+{% set passed = run.entries | selectattr('status', 'equalto', 'passed') | list %}
+{% set failed = run.entries | selectattr('status', 'equalto', 'failed') | list %}
+{% set collided = run.entries | selectattr('status', 'equalto', 'collision') | list %}
+<p>
+    <strong>{{ passed | length }}</strong> passed
+    &middot; <strong>{{ failed | length }}</strong> failed
+    &middot; <strong>{{ collided | length }}</strong> collision(s)
+    &middot; <strong>{{ run.entries | length }}</strong> total
+</p>
+
+{% if passed %}
+<p>
+    <a class="download-btn" href="/batch-runs/{{ run.id }}/package.zip">
+        ⬇ Download Batch Package (.zip) — {{ passed | length }} page{{ '' if passed | length == 1 else 's' }}
+    </a>
+    <small>Install once via AEM Package Manager to create every page in the batch.</small>
+</p>
+{% endif %}
+
+<h2>Per-file results</h2>
+<table>
+    <tr>
+        <th>Folder</th>
+        <th>Docx</th>
+        <th>Page path</th>
+        <th>Status</th>
+        <th>Notes</th>
+    </tr>
+    {% for e in run.entries %}
+    <tr class="status-{{ e.status }}">
+        <td>{{ e.folder }}</td>
+        <td>{{ e.filename }}</td>
+        <td>{% if e.page_path %}<code>{{ e.page_path }}</code>{% else %}&mdash;{% endif %}</td>
+        <td>{{ e.status | upper }}</td>
+        <td>
+            {% if e.error %}
+                {{ e.error }}
+            {% elif e.issues %}
+                {{ e.issues | length }} issue(s)
+            {% else %}
+                &mdash;
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

@@ -14,8 +14,7 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from aem.package_generator.package import PackageMeta, build_package
-
+from aem.package_generator.package import PackageMeta, build_batch_package, build_package
 from aem_client.config import (
     load_page_type_config,
     load_page_type_from_sample,
@@ -25,7 +24,11 @@ from aem_client.config import (
     SiteConfig,
 )
 from aem_client.fetcher import FetchError, fetch_or_cached
-from ui.runs import get_run, list_runs, save_run
+from ui.batch_service import run_batch
+from ui.runs import (
+    get_batch_run, get_run, list_runs,
+    save_batch_run, save_run,
+)
 from ui.service import run_pipeline
 
 BASE_DIR = Path(__file__).parent
@@ -179,6 +182,62 @@ def show_run(request: Request, run_id: str):
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return templates.TemplateResponse(request, "result.html", {"run": record})
+
+
+@app.post("/run-batch")
+def run_batch_route(docx_files: list[UploadFile] = File(...)):
+    """Batch mode -- multiple docx from one picked folder.
+
+    Client-side JavaScript sets each file's transferred filename to its
+    `webkitRelativePath` so we receive `<top-folder>/<subfolder>/<name>.docx`.
+    Each file goes through the same pipeline as single-doc; results are
+    grouped into one batch run.
+    """
+    files: list[tuple[str, bytes]] = []
+    for f in docx_files:
+        name = f.filename or ""
+        if not name.lower().endswith(".docx"):
+            continue
+        blob = f.file.read()
+        files.append((name, blob))
+    if not files:
+        raise HTTPException(400, "No .docx files found in the picked folder.")
+
+    site = load_site_config(SITE_CONFIG_PATH)
+    page_type_cfg, _ = _current_page_type_config(site.active_page_type)
+    result = run_batch(files, page_type_config=page_type_cfg)
+    run_id = save_batch_run(result)
+    return RedirectResponse(f"/batch-runs/{run_id}", status_code=303)
+
+
+@app.get("/batch-runs/{run_id}")
+def show_batch_run(request: Request, run_id: str):
+    record = get_batch_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Batch run not found.")
+    return templates.TemplateResponse(request, "batch_result.html", {"run": record})
+
+
+@app.get("/batch-runs/{run_id}/package.zip")
+def download_batch_package(run_id: str):
+    record = get_batch_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Batch run not found.")
+    trees = [e.aem_tree for e in record.entries
+             if e.status == "passed" and e.aem_tree is not None]
+    if not trees:
+        raise HTTPException(status_code=400,
+                            detail="No successful pages in this batch to package.")
+    meta = PackageMeta(
+        name=(record.filename_top or "batch") + "-batch",
+        description=f"Batch package: {len(trees)} pages from {record.filename_top or 'folder'}",
+    )
+    data = build_batch_package(trees, meta)
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{meta.name}.zip"'},
+    )
 
 
 @app.get("/runs/{run_id}/package.zip")

@@ -92,6 +92,45 @@ def test_package_is_deterministic_across_builds():
     assert a == b
 
 
+def test_build_batch_package_covers_multiple_pages():
+    """One .zip, N pages, multi-root filter.xml so a single install writes
+    every page."""
+    from aem.package_generator.package import build_batch_package
+
+    tree_a = {
+        "name": "one", "path": "/content/site/articles/one",
+        "primary_type": "cq:Page", "properties": {},
+        "children": [{"name": "jcr:content", "primary_type": "cq:PageContent",
+                      "properties": {"jcr:title": "One"}, "children": []}],
+    }
+    tree_b = {
+        "name": "two", "path": "/content/site/articles/two",
+        "primary_type": "cq:Page", "properties": {},
+        "children": [{"name": "jcr:content", "primary_type": "cq:PageContent",
+                      "properties": {"jcr:title": "Two"}, "children": []}],
+    }
+    data = build_batch_package([tree_a, tree_b], _meta())
+
+    with _read_zip(data) as zf:
+        names = set(zf.namelist())
+        assert "META-INF/vault/filter.xml" in names
+        assert "jcr_root/content/site/articles/one/.content.xml" in names
+        assert "jcr_root/content/site/articles/two/.content.xml" in names
+        filter_xml = zf.read("META-INF/vault/filter.xml").decode()
+    assert '<filter root="/content/site/articles/one"/>' in filter_xml
+    assert '<filter root="/content/site/articles/two"/>' in filter_xml
+
+
+def test_batch_package_is_deterministic():
+    from aem.package_generator.package import build_batch_package
+    trees = [
+        {"name": "x", "path": "/content/x", "primary_type": "cq:Page",
+         "properties": {}, "children": []},
+    ]
+    m = _meta()
+    assert build_batch_package(trees, m) == build_batch_package(trees, m)
+
+
 def test_package_meta_defaults_to_sensible_values():
     """Bare PackageMeta with only name works -- version and description
     fall back to defaults."""

@@ -55,12 +55,36 @@ def _entries_for(tree: dict, meta: PackageMeta) -> dict[str, str]:
 def _filter_xml(page_path: str) -> str:
     """Scope the package to this page path so an install doesn't clobber
     sibling pages under the same content root."""
+    return _multi_filter_xml([page_path])
+
+
+def _multi_filter_xml(page_paths: list[str]) -> str:
+    filters = "\n".join(f'    <filter root="{p}"/>' for p in page_paths)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<workspaceFilter version="1.0">\n'
-        f'    <filter root="{page_path}"/>\n'
+        f'{filters}\n'
         '</workspaceFilter>\n'
     )
+
+
+def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
+    """Multi-page variant of build_package: one .zip covers N pages, the
+    filter.xml lists one root per page so a single install writes them
+    all without clobbering unrelated siblings."""
+    entries: dict[str, str] = {
+        "META-INF/vault/filter.xml": _multi_filter_xml([t["path"] for t in trees]),
+        "META-INF/vault/properties.xml": _properties_xml(meta),
+    }
+    for tree in trees:
+        entries[f"jcr_root{tree['path']}/.content.xml"] = node_to_content_xml(tree)
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(entries):
+            info = zipfile.ZipInfo(path, date_time=_FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, entries[path])
+    return buf.getvalue()
 
 
 def _properties_xml(meta: PackageMeta) -> str:

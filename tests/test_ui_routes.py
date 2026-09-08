@@ -621,6 +621,103 @@ def test_history_page_lists_past_runs():
     assert "b.docx" in response.text
 
 
+def test_run_batch_route_uploads_multiple_docx_and_redirects(tmp_path, monkeypatch):
+    """Client picks a folder with 2 subfolders, each holding one docx.
+    Server receives files with webkitRelativePath filenames, groups them
+    into one batch run, and redirects to /batch-runs/{id}."""
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+
+    import docx as docx_lib
+    def make_v3(title):
+        d = docx_lib.Document()
+        d.add_paragraph().add_run(title).bold = True
+        d.add_paragraph(f"Meta Title: {title}")
+        d.add_paragraph("Meta Description: desc")
+        d.add_paragraph("Meta keywords: kw")
+        d.add_paragraph("Body.")
+        buf = io.BytesIO()
+        d.save(buf)
+        buf.seek(0)
+        return buf
+
+    files = [
+        ("docx_files", ("Articles/Article1/one.docx", make_v3("First"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ("docx_files", ("Articles/Article2/two.docx", make_v3("Second"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+    ]
+
+    client = TestClient(app_module.app)
+    resp = client.post("/run-batch", files=files, follow_redirects=False)
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("/batch-runs/")
+
+    page = client.get(resp.headers["location"])
+    assert "Batch Run" in page.text
+    assert "Article1" in page.text
+    assert "Article2" in page.text
+    assert "one.docx" in page.text
+    assert "two.docx" in page.text
+    assert "PASSED" in page.text
+
+
+def test_run_batch_route_rejects_when_no_docx(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+    client = TestClient(app_module.app)
+    resp = client.post(
+        "/run-batch",
+        files=[("docx_files", ("readme.txt", io.BytesIO(b"hi"), "text/plain"))],
+    )
+    assert resp.status_code == 400
+
+
+def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
+    """End-to-end: POST 2 docx -> download /batch-runs/{id}/package.zip ->
+    unzip -> both pages present + multi-root filter.xml."""
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+
+    import docx as docx_lib
+    def make_v3(title):
+        d = docx_lib.Document()
+        d.add_paragraph().add_run(title).bold = True
+        d.add_paragraph(f"Meta Title: {title}")
+        d.add_paragraph("Meta Description: desc")
+        d.add_paragraph("Meta keywords: kw")
+        d.add_paragraph("Body.")
+        buf = io.BytesIO()
+        d.save(buf)
+        buf.seek(0)
+        return buf
+
+    files = [
+        ("docx_files", ("Articles/Article1/one.docx", make_v3("First Article"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ("docx_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+    ]
+    client = TestClient(app_module.app)
+    resp = client.post("/run-batch", files=files, follow_redirects=False)
+    location = resp.headers["location"]
+    run_id = location.rsplit("/", 1)[-1]
+
+    zip_resp = client.get(f"/batch-runs/{run_id}/package.zip")
+    assert zip_resp.status_code == 200
+    assert zip_resp.headers["content-type"] == "application/zip"
+
+    import zipfile
+    from io import BytesIO
+    with zipfile.ZipFile(BytesIO(zip_resp.content)) as zf:
+        names = set(zf.namelist())
+        filter_xml = zf.read("META-INF/vault/filter.xml").decode()
+
+    # both pages present at their JCR paths
+    assert any("first-article" in n for n in names)
+    assert any("second-article" in n for n in names)
+    # multi-root filter
+    assert filter_xml.count("<filter root=") == 2
+
+
 def test_history_page_empty_state():
     client = TestClient(app_module.app)
 
