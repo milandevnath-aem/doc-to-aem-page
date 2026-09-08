@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from aem_client.config import PageTypeConfig
+from mapping.slug import UNRESOLVED_SLUG
 from ui.service import run_pipeline
 
 
@@ -78,6 +79,22 @@ def run_batch(
 
             page_path = (result.aem_tree or {}).get("path", "")
             slug = page_path.rsplit("/", 1)[-1] if page_path else ""
+
+            # Unresolved slug -- the doc has no URL / meta title / other
+            # value the pageNameStrategy can seed a slug from. Drop the
+            # aem_tree so this page never lands in the package, but keep
+            # the row in the log so the operator sees which doc to fix.
+            if slug == UNRESOLVED_SLUG:
+                entries.append(BatchEntry(
+                    folder=folder, filename=filename, page_path="",
+                    status="unresolved",
+                    issues=result.issues,
+                    error=("Could not derive a page name from the doc "
+                           "(no URL, no Meta Title, no other seed for the "
+                           "active pageNameStrategy). Fix the doc metadata "
+                           "and re-upload."),
+                ))
+                continue
 
             if slug and slug in seen_slugs:
                 entries.append(BatchEntry(

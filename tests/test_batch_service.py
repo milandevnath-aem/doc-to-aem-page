@@ -112,6 +112,56 @@ def test_batch_survives_a_failing_doc_and_continues(tmp_path):
     assert result.entries[1].filename == "broken.docx"
 
 
+def _write_v3_doc_no_seed(path: Path) -> None:
+    """v3 doc that validates fine (has Meta Title + Meta Description) but
+    whose Meta Title slugifies to only non-alphanumeric characters, so
+    the mapper's pageNameStrategy = slug_from_meta_title falls back to
+    the UNRESOLVED_SLUG placeholder."""
+    document = docx.Document()
+    document.add_paragraph().add_run("H1").bold = True
+    # Meta Title contains only punctuation -> slugify collapses to empty
+    document.add_paragraph("Meta Title: ---")
+    document.add_paragraph("Meta Description: desc")
+    document.add_paragraph("Meta keywords: kw")
+    document.add_paragraph("Body.")
+    document.save(str(path))
+
+
+def test_batch_flags_unresolvable_page_names_and_drops_them(tmp_path):
+    """A doc that validates OK but whose title slugifies to the
+    UNRESOLVED_SLUG placeholder ('page'). Batch mode marks it unresolved,
+    drops the aem_tree so it never lands in the package, and keeps the
+    row in the log so the operator sees which doc to fix."""
+    (tmp_path / "A1").mkdir()
+    _write_v3_doc_no_seed(tmp_path / "A1" / "nameless.docx")
+
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in tmp_path.rglob("*.docx")]
+
+    result = run_batch(files, page_type_config=_sample_config())
+
+    assert result.entries[0].status == "unresolved"
+    # dropped from the package -- no aem_tree available for the batch builder
+    assert result.entries[0].aem_tree is None
+    assert "could not derive" in result.entries[0].error.lower()
+
+
+def test_batch_unresolved_pages_are_excluded_from_slug_collision_set(tmp_path):
+    """Three docs all slugging to the placeholder must not eat each other
+    as 'collisions' -- each is independently unresolved."""
+    for folder in ["A1", "A2", "A3"]:
+        d = tmp_path / folder
+        d.mkdir()
+        _write_v3_doc_no_seed(d / "d.docx")
+
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in sorted(tmp_path.rglob("*.docx"))]
+
+    result = run_batch(files, page_type_config=_sample_config())
+
+    assert [e.status for e in result.entries] == ["unresolved", "unresolved", "unresolved"]
+
+
 def test_batch_result_carries_top_folder_label(tmp_path):
     (tmp_path / "Articles" / "A1").mkdir(parents=True)
     _write_v3_doc(tmp_path / "Articles" / "A1" / "doc.docx", "One")

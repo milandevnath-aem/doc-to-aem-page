@@ -10,10 +10,12 @@
 {% set passed = run.entries | selectattr('status', 'equalto', 'passed') | list %}
 {% set failed = run.entries | selectattr('status', 'equalto', 'failed') | list %}
 {% set collided = run.entries | selectattr('status', 'equalto', 'collision') | list %}
+{% set unresolved = run.entries | selectattr('status', 'equalto', 'unresolved') | list %}
 <p>
     <strong>{{ passed | length }}</strong> passed
     &middot; <strong>{{ failed | length }}</strong> failed
     &middot; <strong>{{ collided | length }}</strong> collision(s)
+    &middot; <strong>{{ unresolved | length }}</strong> unresolved
     &middot; <strong>{{ run.entries | length }}</strong> total
 </p>
 
