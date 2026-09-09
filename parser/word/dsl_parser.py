@@ -90,6 +90,15 @@ def _has_numbering(paragraph: Paragraph) -> bool:
     return pPr is not None and pPr.numPr is not None
 
 
+def _paragraph_all_bold(paragraph: Paragraph) -> bool:
+    """True when every run with visible text on the paragraph is bold.
+    Real client docs use fully-bold `[normal]` paragraphs as visual
+    section titles instead of a Word Heading style, so this doubles as
+    a heading detector for section-boundary decisions."""
+    visible = [r for r in paragraph.runs if r.text.strip()]
+    return bool(visible) and all(r.bold for r in visible)
+
+
 def _table_to_rows(table: Table) -> list[list[str]]:
     return [[cell.text.strip() for cell in row.cells] for row in table.rows]
 
@@ -387,14 +396,21 @@ class _DslParser:
         style_name = paragraph.style.name if paragraph.style else "Normal"
         # Real client v1/v2 docs mark ONLY the hero banner with
         # `[component:new-hero-banner]` and leave the article body
-        # unmarked. A Word Heading paragraph is the natural end of
-        # the hero -- close it and start an implicit page-description
-        # so the rest of the doc doesn't fold into bannerDescription.
+        # unmarked. The natural end of the hero is a Word Heading
+        # paragraph OR a fully-bold `[normal]` paragraph acting as a
+        # visual section title -- close the hero then and start an
+        # implicit page-description so the article body doesn't fold
+        # into bannerDescription. Only fires after at least one prose
+        # paragraph has accumulated as banner description, so a bold
+        # marker line in the same paragraph as `[component:...]`
+        # can't close the hero before it has any content.
+        is_closer = style_name.startswith("Heading") or _paragraph_all_bold(paragraph)
         if (
-            style_name.startswith("Heading")
+            is_closer
             and self._component is not None
             and self._component["name"] in _BANNER_IMAGE_COMPONENTS
             and self._item is None
+            and self._component["fields"].get("description")
         ):
             self._close_hero_start_implicit_page_desc()
         is_bullet = _has_numbering(paragraph)

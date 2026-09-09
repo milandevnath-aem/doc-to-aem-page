@@ -478,6 +478,41 @@ def test_banner_image_marker_ignored_outside_new_hero_banner(tmp_path):
     assert "imageFile" not in block["fields"]
 
 
+def test_new_hero_banner_closed_on_first_bold_paragraph_after_intro(tmp_path):
+    """Not every real client doc uses a Word Heading style for its
+    section titles -- several use a fully-bold `[normal]` paragraph
+    instead. Close the hero on that too, once at least one prose
+    paragraph has already accumulated as the banner description."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner Image: home.jpg")
+        doc.add_paragraph("Banner intro line one.")
+        # section title as bold-only [normal] paragraph
+        p = doc.add_paragraph()
+        p.add_run("Family Health Insurance").bold = True
+        doc.add_paragraph("Body copy under the bold section title.")
+        doc.add_paragraph("Another body paragraph.")
+
+    path = _build_docx(tmp_path / "bold-close.docx", build)
+    blocks = parse_docx(path)["blocks"]
+
+    assert [b["name"] for b in blocks] == ["new-hero-banner", "page-description"]
+
+    hero_html = blocks[0]["fields"].get("htmltext", "")
+    body_html = blocks[1]["fields"].get("htmltext", "")
+
+    # banner description carries the intro paragraph only
+    assert "Banner intro line one" in hero_html
+    assert "Family Health Insurance" not in hero_html
+    assert "Body copy" not in hero_html
+
+    # implicit page-description carries the bold section title +
+    # everything after it
+    assert "Family Health Insurance" in body_html
+    assert "Body copy under the bold section title" in body_html
+
+
 def test_new_hero_banner_closed_on_first_heading_after_its_prose(tmp_path):
     """Real client docs use a SINGLE `[component:new-hero-banner]` marker
     then leave the article body unmarked (no `[component:page-description]`
