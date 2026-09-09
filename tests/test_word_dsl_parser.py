@@ -557,6 +557,39 @@ def test_frequently_asked_questions_label_also_triggers_faq_split(tmp_path):
     assert "Q?" in faq_html and "A." in faq_html
 
 
+def test_new_hero_banner_closed_on_empty_paragraph_gap(tmp_path):
+    """Some real client docs place a horizontal rule between the banner
+    section and the article body, with no bold or Heading paragraph
+    that acts as a section title. The .docx XML shows all border
+    values `nil` so the rule itself can't be detected -- but an EMPTY
+    paragraph always sits at that boundary. Close the hero on the
+    empty-paragraph gap once the hero has accumulated real content."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner Image: home.jpg")
+        doc.add_paragraph("Banner intro paragraph one.")
+        doc.add_paragraph("Banner intro paragraph two.")
+        doc.add_paragraph()  # empty separator (visually a HR)
+        doc.add_paragraph("Body copy paragraph starts here.")
+        doc.add_paragraph("Another body paragraph.")
+
+    path = _build_docx(tmp_path / "empty-gap.docx", build)
+    blocks = parse_docx(path)["blocks"]
+
+    assert [b["name"] for b in blocks] == ["new-hero-banner", "page-description"]
+
+    hero_html = blocks[0]["fields"].get("htmltext", "")
+    body_html = blocks[1]["fields"].get("htmltext", "")
+
+    assert "Banner intro paragraph one" in hero_html
+    assert "Banner intro paragraph two" in hero_html
+    assert "Body copy" not in hero_html
+
+    assert "Body copy paragraph starts here" in body_html
+    assert "Another body paragraph" in body_html
+
+
 def test_new_hero_banner_closed_on_first_bold_paragraph_after_intro(tmp_path):
     """Not every real client doc uses a Word Heading style for its
     section titles -- several use a fully-bold `[normal]` paragraph

@@ -414,7 +414,18 @@ class _DslParser:
         # paragraph has accumulated as banner description, so a bold
         # marker line in the same paragraph as `[component:...]`
         # can't close the hero before it has any content.
-        is_closer = style_name.startswith("Heading") or _paragraph_all_bold(paragraph)
+        # Empty paragraphs inside the hero act as section breaks --
+        # some real client docs place a horizontal rule between the
+        # banner and the article body and Word writes the rule out
+        # as an empty paragraph with `nil` borders (undetectable via
+        # XML alone), so the empty gap is the reliable boundary
+        # marker for that pattern.
+        is_empty = not paragraph.text.strip()
+        is_closer = (
+            style_name.startswith("Heading")
+            or _paragraph_all_bold(paragraph)
+            or is_empty
+        )
         if (
             is_closer
             and self._component is not None
@@ -423,6 +434,11 @@ class _DslParser:
             and self._component["fields"].get("description")
         ):
             self._close_hero_start_implicit_page_desc()
+            if is_empty:
+                # nothing more to do -- an empty paragraph has no lines
+                # to process, and the implicit page-description is now
+                # already open for the next paragraph
+                return
         # Bold-only "FAQ" heading inside an implicit page-description
         # opens a NEW page-description block for the FAQ section so
         # Q/A copy doesn't fold into the main article body block.
