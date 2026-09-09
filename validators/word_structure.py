@@ -106,17 +106,28 @@ class _ValidatingDslParser(_DslParser):
             self._record("warning", "empty-component",
                 f"Component '{self._component['name']}' has no fields, items, or table before end of document.")
 
-        if not self._metadata_marker_seen:
+        # Real client docs often skip the `[metadata]` table entirely
+        # and put v3-style Meta Title / Meta Description key lines at
+        # the top of the file. The parser captures those into
+        # page_properties, so the validator treats their presence as an
+        # equivalent, marker-less metadata source -- required fields
+        # still have to be there.
+        has_inline_meta = REQUIRED_METADATA <= {
+            k.lower() for k in self.page_properties
+        }
+        if not self._metadata_marker_seen and not has_inline_meta:
             self.issues.insert(0, Issue("error", "missing-metadata-marker",
-                "No [metadata] marker found anywhere in the document.", 0))
-        elif not self._metadata_table_seen:
+                "No [metadata] marker (and no v3-style Meta Title/"
+                "Meta Description inline keys) found anywhere in the "
+                "document.", 0))
+        elif self._metadata_marker_seen and not self._metadata_table_seen:
             self.issues.insert(0, Issue("error", "missing-metadata-table",
                 "[metadata] marker found but no Property|Value table follows it.", 0, "[metadata]"))
         else:
             missing = REQUIRED_METADATA - {k.lower() for k in self.page_properties}
             if missing:
                 self.issues.insert(0, Issue("error", "missing-required-metadata",
-                    f"Metadata table is missing required field(s): {sorted(missing)}.", 0, "[metadata]"))
+                    f"Metadata is missing required field(s): {sorted(missing)}.", 0, "[metadata]"))
 
         for component in self.blocks:
             self._finalize_rte(component["fields"])
