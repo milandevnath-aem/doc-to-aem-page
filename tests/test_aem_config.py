@@ -237,3 +237,73 @@ def test_component_mapping_dict_missing_resource_type_raises():
     }
     with pytest.raises(KeyError):
         PageTypeConfig.from_dict(raw)
+
+
+# ---- asset DAM path resolution (Phase 2B) ----
+
+def _basic_cfg(**overrides) -> PageTypeConfig:
+    base = {
+        "type": "article",
+        "template_path": "/conf/x",
+        "content_root": "/content/x",
+        "dam_root": "/content/dam/iffcotokio/articles",
+        "page_name_strategy": "slug_from_url",
+        "component_mappings": {},
+    }
+    base.update(overrides)
+    return PageTypeConfig(**base)
+
+
+def test_asset_dam_path_defaults_to_flat_layout():
+    """Without the sub-base sorting flag, every asset for the page lives
+    directly under `dam_root`, keeping the original filename. Matches the
+    existing hand-authored asset convention for this client."""
+    cfg = _basic_cfg()
+    assert cfg.asset_dam_path(
+        page_slug="cashless-treatment-vs-reimbursement-claims",
+        filename="car-insurance.jpg",
+    ) == "/content/dam/iffcotokio/articles/car-insurance.jpg"
+
+
+def test_asset_dam_path_with_sub_base_sorting_buckets_per_page():
+    """`enable_sub_base_image_sorting=True` puts every page's assets in a
+    sub-folder named after the page slug, so cross-page filename collisions
+    can't overwrite each other."""
+    cfg = _basic_cfg(enable_sub_base_image_sorting=True)
+    assert cfg.asset_dam_path(
+        page_slug="cashless-treatment-vs-reimbursement-claims",
+        filename="car-insurance.jpg",
+    ) == "/content/dam/iffcotokio/articles/cashless-treatment-vs-reimbursement-claims/car-insurance.jpg"
+
+
+def test_asset_dam_path_preserves_original_filename_casing():
+    """The DAM path keeps the filename exactly as it appears in the doc
+    marker -- no forced lowercase, no extension normalization -- so the
+    installed asset name matches what the operator sees on disk."""
+    cfg = _basic_cfg()
+    assert cfg.asset_dam_path("some-slug", "Hero-Banner.PNG").endswith(
+        "/Hero-Banner.PNG"
+    )
+
+
+def test_enable_sub_base_image_sorting_from_cf_camel_case():
+    """CF payload uses camelCase; from_dict normalizes it just like every
+    other camelCase field."""
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y",
+        "damRoot": "/content/dam/x",
+        "pageNameStrategy": "slug_from_url", "componentMappings": {},
+        "enableSubBaseImageSorting": True,
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.enable_sub_base_image_sorting is True
+
+
+def test_enable_sub_base_image_sorting_defaults_false_when_absent():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y",
+        "damRoot": "/z", "pageNameStrategy": "slug_from_url",
+        "componentMappings": {},
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.enable_sub_base_image_sorting is False
