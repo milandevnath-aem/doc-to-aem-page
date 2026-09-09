@@ -51,20 +51,79 @@ _FIELD_RENAMES = {
 }
 
 
-def map_ncm_to_node_tree(ncm: dict, cfg: PageTypeConfig) -> dict:
+def map_ncm_to_node_tree(
+    ncm: dict,
+    cfg: PageTypeConfig,
+    page_assets: dict[str, bytes] | None = None,
+) -> dict:
     page_name = _pick_page_name(ncm, cfg)
     page_path = f"{cfg.content_root.rstrip('/')}/{page_name}"
+    # Resolve folder assets BEFORE building the tree so per-block
+    # `imageFile` markers get rewritten into `imagePath` on the NCM
+    # itself; the rest of the pipeline stays oblivious to the lookup.
+    resolved_assets = _resolve_page_assets(ncm, cfg, page_name, page_assets or {})
     if cfg.template_initial_content:
         jcr_content = _build_jcr_content_from_template(ncm, cfg)
     else:
         jcr_content = _build_jcr_content(ncm, cfg)
-    return {
+    tree = {
         "name": page_name,
         "path": page_path,
         "primary_type": "cq:Page",
         "properties": {},
         "children": [jcr_content],
     }
+    if resolved_assets:
+        # Special key stripped by the packager before XML serialization;
+        # kept on the page node so batch-mode iterates assets per-page
+        # in the same shape it iterates the multi-root filter.
+        tree["_assets"] = resolved_assets
+    return tree
+
+
+def _resolve_page_assets(
+    ncm: dict, cfg: PageTypeConfig, page_slug: str,
+    page_assets: dict[str, bytes],
+) -> list[dict]:
+    """Walk every NCM block; for any `imageFile` marker, look up the
+    referenced filename in `page_assets` (case-insensitive) and rewrite
+    the block's fields:
+
+        imageFile: "car-insurance.jpg"
+            -> imagePath: "<dam_root>/[slug/]car-insurance.jpg" and drop imageFile.
+
+    A miss (referenced file not in the folder) drops the marker WITHOUT
+    setting imagePath, so the template's default asset stays in place.
+
+    Returns descriptors of the assets that were resolved, in NCM block
+    order, for the packager to bundle.
+    """
+    if not page_assets:
+        # Even when no assets are supplied, strip the marker so
+        # single-doc runs don't ship the internal signal as a JCR
+        # property.
+        for block in ncm.get("blocks", []):
+            block.get("fields", {}).pop("imageFile", None)
+        return []
+    by_lower = {name.lower(): (name, blob) for name, blob in page_assets.items()}
+    descriptors: list[dict] = []
+    for block in ncm.get("blocks", []):
+        fields = block.get("fields", {})
+        marker = fields.pop("imageFile", None)
+        if not marker:
+            continue
+        match = by_lower.get(marker.lower())
+        if not match:
+            continue  # missing asset -> template default preserved
+        actual_name, blob = match
+        dam_path = cfg.asset_dam_path(page_slug, actual_name)
+        fields["imagePath"] = dam_path
+        descriptors.append({
+            "dam_path": dam_path,
+            "filename": actual_name,
+            "bytes": blob,
+        })
+    return descriptors
 
 
 def _pick_page_name(ncm: dict, cfg: PageTypeConfig) -> str:
