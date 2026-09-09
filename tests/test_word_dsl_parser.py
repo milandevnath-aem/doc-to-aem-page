@@ -478,6 +478,85 @@ def test_banner_image_marker_ignored_outside_new_hero_banner(tmp_path):
     assert "imageFile" not in block["fields"]
 
 
+def test_faq_heading_splits_page_description_into_own_block(tmp_path):
+    """Real client docs end the article body with a bold FAQ heading
+    (`FAQs`, `FAQS`, `Frequently Asked Questions (FAQ)`) followed by
+    Q/A pairs. That FAQ section must land in its own page-description
+    block, not fold into the main body page-description -- otherwise
+    Q/A copy pollutes the article body content on the rendered page."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner Image: home.jpg")
+        doc.add_paragraph("Banner intro.")
+        # section title as fully-bold [normal] paragraph
+        p = doc.add_paragraph()
+        p.add_run("Family Health Insurance").bold = True
+        doc.add_paragraph("Main body copy.")
+        # FAQ section
+        p = doc.add_paragraph()
+        p.add_run("FAQs").bold = True
+        p = doc.add_paragraph()
+        p.add_run("Q1?").bold = True
+        doc.add_paragraph("A1.")
+        p = doc.add_paragraph()
+        p.add_run("Q2?").bold = True
+        doc.add_paragraph("A2.")
+
+    path = _build_docx(tmp_path / "faq-split.docx", build)
+    blocks = parse_docx(path)["blocks"]
+
+    # Three blocks: hero + main body page-description + FAQ page-description
+    names = [b["name"] for b in blocks]
+    assert names == [
+        "new-hero-banner",
+        "page-description",   # main body
+        "page-description",   # FAQ
+    ], names
+
+    main = blocks[1]["fields"].get("htmltext", "")
+    faq = blocks[2]["fields"].get("htmltext", "")
+
+    # main body has the section title + body copy, NO FAQ
+    assert "Family Health Insurance" in main
+    assert "Main body copy" in main
+    assert "FAQs" not in main
+    assert "Q1?" not in main
+    assert "A1." not in main
+
+    # FAQ block carries the FAQ heading + all Q/A copy
+    assert "FAQs" in faq
+    assert "Q1?" in faq
+    assert "A1." in faq
+    assert "Q2?" in faq
+    assert "A2." in faq
+
+
+def test_frequently_asked_questions_label_also_triggers_faq_split(tmp_path):
+    """The FAQ trigger accepts the long form too, with optional
+    parenthetical `(FAQ)` suffix and any casing."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner Image: home.jpg")
+        doc.add_paragraph("Body intro.")
+        p = doc.add_paragraph()
+        p.add_run("Section Two").bold = True
+        doc.add_paragraph("More body copy.")
+        p = doc.add_paragraph()
+        p.add_run("Frequently Asked Questions (FAQ)").bold = True
+        p = doc.add_paragraph()
+        p.add_run("Q?").bold = True
+        doc.add_paragraph("A.")
+
+    path = _build_docx(tmp_path / "faq-long.docx", build)
+    blocks = parse_docx(path)["blocks"]
+    assert [b["name"] for b in blocks][-1] == "page-description"
+    faq_html = blocks[-1]["fields"].get("htmltext", "")
+    assert "Frequently Asked Questions" in faq_html
+    assert "Q?" in faq_html and "A." in faq_html
+
+
 def test_new_hero_banner_closed_on_first_bold_paragraph_after_intro(tmp_path):
     """Not every real client doc uses a Word Heading style for its
     section titles -- several use a fully-bold `[normal]` paragraph

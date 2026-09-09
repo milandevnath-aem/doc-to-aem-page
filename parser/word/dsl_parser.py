@@ -72,6 +72,16 @@ _V3_STYLE_META_KEY_MAP = {
 BANNER_IMAGE_RE = re.compile(r"^banner\s+image:\s*(\S.+?\.(?:png|jpe?g|svg|gif|webp))\s*$", re.I)
 _BANNER_IMAGE_COMPONENTS = {"new-hero-banner"}
 
+# Bold-only paragraph text that reliably marks the FAQ section in real
+# client docs. `FAQ`, `FAQs`, `FAQS`, or the long form with an optional
+# `(FAQ)` suffix -- any casing. When the parser hits one of these
+# inside an implicit page-description block it opens a NEW
+# page-description block so the FAQ copy doesn't fold into the main
+# body page-description on the rendered page.
+_FAQ_LABEL_RE = re.compile(
+    r"^(?:faqs?|frequently\s+asked\s+questions(?:\s*\(faq\))?)\s*$", re.I,
+)
+
 _BLIP_QN = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
 _EMBED_QN = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
 _WRITABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
@@ -413,6 +423,19 @@ class _DslParser:
             and self._component["fields"].get("description")
         ):
             self._close_hero_start_implicit_page_desc()
+        # Bold-only "FAQ" heading inside an implicit page-description
+        # opens a NEW page-description block for the FAQ section so
+        # Q/A copy doesn't fold into the main article body block.
+        if (
+            _paragraph_all_bold(paragraph)
+            and self._component is not None
+            and self._component["name"] == "page-description"
+            and self._item is None
+            and self._component["fields"].get("description")
+            and _FAQ_LABEL_RE.match(paragraph.text.strip())
+        ):
+            self._start_component("page-description", None)
+            self._active_field = "description"
         is_bullet = _has_numbering(paragraph)
         for line, spans in _paragraph_lines(paragraph):
             if not line:
