@@ -476,3 +476,45 @@ def test_banner_image_marker_ignored_outside_new_hero_banner(tmp_path):
     block = parse_docx(path)["blocks"][0]
 
     assert "imageFile" not in block["fields"]
+
+
+def test_new_hero_banner_closed_on_first_heading_after_its_prose(tmp_path):
+    """Real client docs use a SINGLE `[component:new-hero-banner]` marker
+    then leave the article body unmarked (no `[component:page-description]`
+    to switch to). A Word Heading paragraph is the natural end of the
+    banner section -- close the hero and start an implicit
+    page-description so the rest of the doc lands in a separate
+    component instead of being folded into bannerDescription."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner Image: car.jpg")
+        doc.add_paragraph("Banner intro prose one.")
+        doc.add_paragraph("Banner intro prose two.")
+        doc.add_paragraph()  # empty separator
+        doc.add_paragraph("What is Cashless Treatment?", style="Heading 2")
+        doc.add_paragraph("Body copy under the H2.")
+        doc.add_paragraph("Another body paragraph.")
+
+    path = _build_docx(tmp_path / "auto-close.docx", build)
+    blocks = parse_docx(path)["blocks"]
+
+    # Two blocks: hero-banner + implicit page-description
+    assert [b["name"] for b in blocks] == ["new-hero-banner", "page-description"]
+
+    hero = blocks[0]
+    assert hero["fields"]["imageFile"] == "car.jpg"
+    hero_html = hero["fields"].get("htmltext", "")
+    # banner description holds only the intro paragraphs -- headings
+    # and body copy that follow are NOT in it
+    assert "Banner intro prose one" in hero_html
+    assert "Banner intro prose two" in hero_html
+    assert "Cashless Treatment" not in hero_html
+    assert "Body copy" not in hero_html
+
+    body = blocks[1]
+    body_html = body["fields"].get("htmltext", "")
+    # implicit page-description carries the H2 + body copy
+    assert "Cashless Treatment" in body_html
+    assert "Body copy under the H2." in body_html
+    assert "Another body paragraph" in body_html

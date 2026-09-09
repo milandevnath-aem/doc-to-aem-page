@@ -385,6 +385,18 @@ class _DslParser:
             if rid:
                 self.handle_image(paragraph.part.related_parts[rid])
         style_name = paragraph.style.name if paragraph.style else "Normal"
+        # Real client v1/v2 docs mark ONLY the hero banner with
+        # `[component:new-hero-banner]` and leave the article body
+        # unmarked. A Word Heading paragraph is the natural end of
+        # the hero -- close it and start an implicit page-description
+        # so the rest of the doc doesn't fold into bannerDescription.
+        if (
+            style_name.startswith("Heading")
+            and self._component is not None
+            and self._component["name"] in _BANNER_IMAGE_COMPONENTS
+            and self._item is None
+        ):
+            self._close_hero_start_implicit_page_desc()
         is_bullet = _has_numbering(paragraph)
         for line, spans in _paragraph_lines(paragraph):
             if not line:
@@ -403,6 +415,15 @@ class _DslParser:
                 self.handle_bullet_line(line, spans)
             else:
                 self.handle_plain_line(line, spans)
+
+    def _close_hero_start_implicit_page_desc(self) -> None:
+        """End the current new-hero-banner block and open an implicit
+        `[component:page-description]` so subsequent Heading/prose/bullet
+        content lands under it. The implicit page-description then owns
+        an active `description` field so plain lines flow into RTE
+        without another explicit `description:` key line."""
+        self._start_component("page-description", None)
+        self._active_field = "description"
 
     def _try_capture_v3_style_meta(self, line: str) -> bool:
         """Capture v3-style inline meta keys as page.properties whenever
