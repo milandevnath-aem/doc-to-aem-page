@@ -58,6 +58,11 @@ def map_ncm_to_node_tree(
 ) -> dict:
     page_name = _pick_page_name(ncm, cfg)
     page_path = f"{cfg.content_root.rstrip('/')}/{page_name}"
+    # Sync page-level meta into block fields BEFORE resolving assets or
+    # walking blocks. Currently only new-hero-banner needs this (its
+    # `title` field feeds bannerTitle, and the doc has no per-block
+    # title of its own -- it comes from the Meta Title line).
+    _inject_page_meta_into_blocks(ncm)
     # Resolve folder assets BEFORE building the tree so per-block
     # `imageFile` markers get rewritten into `imagePath` on the NCM
     # itself; the rest of the pipeline stays oblivious to the lookup.
@@ -79,6 +84,28 @@ def map_ncm_to_node_tree(
         # in the same shape it iterates the multi-root filter.
         tree["_assets"] = resolved_assets
     return tree
+
+
+# Components whose `title` field is authoritatively sourced from the
+# doc's Meta Title (page.properties.title), NOT from an in-block title
+# line. Extend when a second component adopts the same contract.
+_META_TITLE_COMPONENTS = {"new-hero-banner"}
+
+
+def _inject_page_meta_into_blocks(ncm: dict) -> None:
+    """Populate per-block `title` from `page.properties.title` for the
+    components that source their title from the doc's Meta Title. Runs
+    BEFORE mapping so the standard `fieldRenames` (title -> bannerTitle)
+    picks it up like any other field. Skips blocks whose `title` was
+    already authored inline (author intent wins)."""
+    meta_title = (ncm.get("page", {}).get("properties", {}) or {}).get("title") or ""
+    if not meta_title:
+        return
+    for block in ncm.get("blocks", []):
+        if block.get("name") not in _META_TITLE_COMPONENTS:
+            continue
+        fields = block.setdefault("fields", {})
+        fields.setdefault("title", meta_title)
 
 
 def _resolve_page_assets(
