@@ -416,3 +416,63 @@ def test_validate_docx_clean_doc_has_no_errors(tmp_path):
     issues = validate_docx(path)
 
     assert not any(i.severity == "error" for i in issues)
+
+
+def test_new_hero_banner_extracts_banner_image_filename(tmp_path):
+    """The `Banner Image: <file>` line inside a `[component:new-hero-banner]`
+    block is a component-specific asset marker: filename lands on the
+    component's `imageFile` field, and does NOT leak into `htmltext` or
+    the implicit `title` (which the mapper later overrides with meta title
+    anyway)."""
+    def build(doc):
+        _add_metadata(doc)
+        _add_soft_broken(
+            doc,
+            "[component:new-hero-banner]",
+            "Banner Image: car-insurance.jpg",
+            "",
+            "A family health insurance plan helps pay hospital bills.",
+        )
+
+    path = _build_docx(tmp_path / "hero_asset.docx", build)
+    hero = parse_docx(path)["blocks"][0]
+
+    assert hero["name"] == "new-hero-banner"
+    assert hero["fields"]["imageFile"] == "car-insurance.jpg"
+    # description survives, without the marker line polluting it
+    assert "Banner Image" not in hero["fields"].get("htmltext", "")
+    assert "family health insurance" in hero["fields"].get("htmltext", "")
+    # implicit title must NOT be the banner-image line
+    assert hero["fields"].get("title", "") != "Banner Image: car-insurance.jpg"
+
+
+def test_new_hero_banner_banner_image_marker_case_insensitive(tmp_path):
+    """Filename lookup is case-insensitive; marker keyword tolerates casing
+    variance (`banner image`, `BANNER IMAGE`)."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("BANNER IMAGE: HERO-BANNER.PNG")
+        doc.add_paragraph("Body copy.")
+
+    path = _build_docx(tmp_path / "hero_case.docx", build)
+    hero = parse_docx(path)["blocks"][0]
+
+    assert hero["fields"]["imageFile"] == "HERO-BANNER.PNG"
+    assert "BANNER IMAGE" not in hero["fields"].get("htmltext", "")
+
+
+def test_banner_image_marker_ignored_outside_new_hero_banner(tmp_path):
+    """The `Banner Image:` shortcut only applies inside a
+    `[component:new-hero-banner]` block. Any other component treats the
+    same line as ordinary prose so we don't hijack unrelated authoring."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:page-description]")
+        doc.add_paragraph("Banner Image: not-a-banner.jpg")
+        doc.add_paragraph("Content.")
+
+    path = _build_docx(tmp_path / "other.docx", build)
+    block = parse_docx(path)["blocks"][0]
+
+    assert "imageFile" not in block["fields"]

@@ -46,6 +46,15 @@ MARKER_RE = re.compile(r"^\[([\w -]+)\]$")
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]{0,40}):-?\s*(.*)$")
 IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|svg|gif|webp)$", re.I)
 
+# ponytail: component-specific asset marker for new-hero-banner. The line
+# `Banner Image: <file>` inside a `[component:new-hero-banner]` block names
+# the DAM asset in the same folder to wire into the component's imagePath.
+# Not added to ALLOWED_KEYS globally: other components would silently accept
+# `Image: foo.jpg` as a real field. Extend to more components when a second
+# one asks for the same pattern.
+BANNER_IMAGE_RE = re.compile(r"^banner\s+image:\s*(\S.+?\.(?:png|jpe?g|svg|gif|webp))\s*$", re.I)
+_BANNER_IMAGE_COMPONENTS = {"new-hero-banner"}
+
 _BLIP_QN = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
 _EMBED_QN = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
 _WRITABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
@@ -252,6 +261,25 @@ class _DslParser:
     def handle_plain_line(self, text: str, spans: list[tuple[str, dict]]):
         if self._component is None:
             return
+        # Component-specific asset marker MUST run before implicit/RTE dumping,
+        # otherwise the "Banner Image: foo.jpg" line ends up as the block's
+        # implicit title (first unkeyed line) OR gets folded into the RTE
+        # description.
+        if (
+            self._component["name"] in _BANNER_IMAGE_COMPONENTS
+            and self._item is None
+        ):
+            m = BANNER_IMAGE_RE.match(text)
+            if m:
+                self._component["fields"]["imageFile"] = m.group(1).strip()
+                # Every subsequent unkeyed line inside a new-hero-banner
+                # block IS the banner description RTE. Activating the field
+                # up front prevents `_handle_implicit_line` from stealing
+                # the first prose paragraph as an implicit `title` (a title
+                # the mapper wouldn't use anyway -- it takes bannerTitle
+                # from the doc's Meta Title).
+                self._active_field = "description"
+                return
         if self._active_field is None:
             self._handle_implicit_line(text, spans)
             return
