@@ -185,22 +185,23 @@ def show_run(request: Request, run_id: str):
 
 
 @app.post("/run-batch")
-def run_batch_route(docx_files: list[UploadFile] = File(...)):
-    """Batch mode -- multiple docx from one picked folder.
+def run_batch_route(all_files: list[UploadFile] = File(...)):
+    """Batch mode -- multiple files from one picked folder (docx + assets).
 
     Client-side JavaScript sets each file's transferred filename to its
-    `webkitRelativePath` so we receive `<top-folder>/<subfolder>/<name>.docx`.
-    Each file goes through the same pipeline as single-doc; results are
-    grouped into one batch run.
+    `webkitRelativePath` so we receive `<top-folder>/<subfolder>/<name>.<ext>`.
+    `ui.batch_service.run_batch` partitions on the docx extension: docx
+    files feed the pipeline, sibling non-docx files ride as per-page
+    assets scoped to the same subfolder.
     """
     files: list[tuple[str, bytes]] = []
-    for f in docx_files:
+    for f in all_files:
         name = f.filename or ""
-        if not name.lower().endswith(".docx"):
+        if not name:
             continue
         blob = f.file.read()
         files.append((name, blob))
-    if not files:
+    if not any(name.lower().endswith(".docx") for name, _ in files):
         raise HTTPException(400, "No .docx files found in the picked folder.")
 
     site = load_site_config(SITE_CONFIG_PATH)
@@ -223,8 +224,18 @@ def download_batch_package(run_id: str):
     record = get_batch_run(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Batch run not found.")
-    trees = [e.aem_tree for e in record.entries
-             if e.status == "passed" and e.aem_tree is not None]
+    trees: list[dict] = []
+    for entry in record.entries:
+        if entry.status != "passed" or entry.aem_tree is None:
+            continue
+        # Re-attach the resolved assets to the tree so the packager
+        # sees them. `_assets` was pulled off at run time to keep the
+        # DB payload JSON-safe (bytes -> base64 in `assets`), and now
+        # goes back onto a shallow copy for this one build.
+        tree = {**entry.aem_tree}
+        if entry.assets:
+            tree["_assets"] = entry.assets
+        trees.append(tree)
     if not trees:
         raise HTTPException(status_code=400,
                             detail="No successful pages in this batch to package.")

@@ -35,6 +35,7 @@
         <th>Docx</th>
         <th>Page path</th>
         <th>Status</th>
+        <th>Assets</th>
         <th>Notes</th>
     </tr>
     {% for e in run.entries %}
@@ -43,6 +44,17 @@
         <td>{{ e.filename }}</td>
         <td>{% if e.page_path %}<code>{{ e.page_path }}</code>{% else %}&mdash;{% endif %}</td>
         <td>{{ e.status | upper }}</td>
+        <td>
+            {% if e.assets %}
+                <strong>{{ e.assets | length }}</strong>
+                {% for a in e.assets %}
+                    <br><small><code>{{ a.filename }}</code>
+                        &rarr; <code>{{ a.dam_path }}</code></small>
+                {% endfor %}
+            {% else %}
+                &mdash;
+            {% endif %}
+        </td>
         <td>
             {% if e.error %}
                 {{ e.error }}

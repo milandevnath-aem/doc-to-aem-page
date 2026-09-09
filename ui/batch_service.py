@@ -6,6 +6,7 @@ Page path is derived from the doc's own content via pageNameStrategy,
 same as a single-doc upload.
 """
 
+import base64
 import dataclasses
 import tempfile
 from dataclasses import dataclass, field
@@ -21,9 +22,15 @@ class BatchEntry:
     folder: str          # first path segment of the relative path
     filename: str        # docx basename
     page_path: str       # computed JCR path, or "" on failure
-    status: str          # passed | failed | collision
+    status: str          # passed | failed | collision | unresolved
     issues: list[dict] = field(default_factory=list)
     aem_tree: dict | None = None
+    # Phase 2B: per-page assets resolved from the folder's non-docx
+    # siblings. Bytes stay in memory during a run; entries_to_json_list
+    # base64-encodes them for DB persistence and entries_from_json_list
+    # decodes them back. Package build re-attaches them to aem_tree
+    # under `_assets` for the packager to bundle.
+    assets: list[dict] = field(default_factory=list)
     error: str | None = None
 
 
@@ -116,10 +123,19 @@ def run_batch(
 
             if slug:
                 seen_slugs.add(slug)
+            # Pull assets off the tree BEFORE storing -- bytes are not
+            # JSON-serializable, and the packager reads them from the
+            # entry (not the tree) so keeping them here is cleaner
+            # anyway. Package build re-attaches them to a tree copy.
+            page_assets_out = (
+                result.aem_tree.pop("_assets", [])
+                if result.aem_tree else []
+            )
             entries.append(BatchEntry(
                 folder=folder, filename=filename,
                 page_path=page_path, status=result.status,
                 issues=result.issues, aem_tree=result.aem_tree,
+                assets=page_assets_out,
             ))
 
     return BatchResult(filename_top=top_folder, entries=entries)
@@ -170,8 +186,37 @@ def _first_error(issues: list[dict]) -> str | None:
 
 
 def entries_to_json_list(entries: list[BatchEntry]) -> list[dict]:
-    return [dataclasses.asdict(e) for e in entries]
+    """Round-trip an entries list through JSON safely. `assets[*].bytes`
+    are base64-encoded here so the DB layer can `json.dumps` the value;
+    `entries_from_json_list` decodes them back to raw bytes."""
+    out: list[dict] = []
+    for entry in entries:
+        row = dataclasses.asdict(entry)
+        row["assets"] = [_asset_to_json(a) for a in row.get("assets", [])]
+        out.append(row)
+    return out
 
 
 def entries_from_json_list(data: list[dict]) -> list[BatchEntry]:
-    return [BatchEntry(**e) for e in data]
+    result: list[BatchEntry] = []
+    for row in data:
+        row = dict(row)
+        row["assets"] = [_asset_from_json(a) for a in row.get("assets", [])]
+        result.append(BatchEntry(**row))
+    return result
+
+
+def _asset_to_json(asset: dict) -> dict:
+    return {
+        "dam_path": asset["dam_path"],
+        "filename": asset["filename"],
+        "bytes_b64": base64.b64encode(asset["bytes"]).decode("ascii"),
+    }
+
+
+def _asset_from_json(row: dict) -> dict:
+    return {
+        "dam_path": row["dam_path"],
+        "filename": row["filename"],
+        "bytes": base64.b64decode(row["bytes_b64"]),
+    }

@@ -269,11 +269,13 @@ def test_batch_wires_folder_assets_to_hero_banner_imagepath(tmp_path):
     assert hero["properties"]["imagePath"] == \
         "/content/dam/site/articles/car-insurance.jpg"
 
-    # asset descriptor rides on the tree for the packager
-    assets = entry.aem_tree.get("_assets", [])
-    assert len(assets) == 1
-    assert assets[0]["filename"] == "car-insurance.jpg"
-    assert assets[0]["bytes"] == b"\x89PNG-bytes"
+    # asset descriptor rides on the entry (bytes -> base64 at DB persist);
+    # the batch package route re-attaches it to a tree copy on download.
+    assert len(entry.assets) == 1
+    assert entry.assets[0]["filename"] == "car-insurance.jpg"
+    assert entry.assets[0]["bytes"] == b"\x89PNG-bytes"
+    # ...and MUST have been stripped off the tree itself (not JSON-safe).
+    assert "_assets" not in entry.aem_tree
 
 
 def test_batch_missing_folder_asset_keeps_template_default(tmp_path):
@@ -300,7 +302,7 @@ def test_batch_missing_folder_asset_keeps_template_default(tmp_path):
     # template default (from staticProperties) preserved
     assert hero["properties"]["imagePath"] == \
         "/content/dam/site/banner/default.png"
-    assert entry.aem_tree.get("_assets", []) == []
+    assert entry.assets == []
 
 
 def test_batch_assets_scoped_per_folder_no_cross_leak(tmp_path):
@@ -330,7 +332,7 @@ def test_batch_assets_scoped_per_folder_no_cross_leak(tmp_path):
     assert a1_hero_path == "/content/dam/site/articles/img.jpg"
     # Article2's marker doesn't resolve -> template default survives
     assert a2_hero_path == "/content/dam/site/banner/default.png"
-    assert a2_entry.aem_tree.get("_assets", []) == []
+    assert a2_entry.assets == []
 
 
 def _dig_hero_imagepath(tree: dict) -> str:
