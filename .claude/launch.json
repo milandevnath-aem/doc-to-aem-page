@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pipeline-operator-ui",
+      "runtimeExecutable": "D:\\iffcotokio\\revamp\\workspace\\code\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": [
+        "-m", "uvicorn", "ui.app:app",
+        "--app-dir", "D:\\iffcotokio\\revamp\\workspace\\code",
+        "--port", "8001",
+        "--reload"
+      ],
+      "port": 8001
+    }
+  ]
+}

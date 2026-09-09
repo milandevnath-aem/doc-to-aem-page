@@ -16,3 +16,4 @@ ui/uploads/
 /uploads/
 ui/static/assets/
 config/cache/
+.claude/worktrees/
