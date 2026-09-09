@@ -42,13 +42,20 @@ def run_batch(
     Files are expected as tuples so the route handler can hand them off
     without the fastapi UploadFile abstraction leaking in here -- keeps
     this layer usable from tests + a future CLI.
+
+    Non-docx files in each subfolder ride the batch as page assets: they
+    are grouped by their parent folder and passed to the pipeline for
+    every docx in that same folder. The mapper resolves per-block
+    `Banner Image:` markers against this dict; the packager bundles the
+    ones that resolved.
     """
     top_folder = _pick_top_folder(files)
+    docx_files, assets_by_folder = _partition_files_by_folder(files)
     entries: list[BatchEntry] = []
     seen_slugs: set[str] = set()
 
     with tempfile.TemporaryDirectory() as tmp:
-        for rel_path, blob in files:
+        for rel_path, blob in docx_files:
             parts = rel_path.replace("\\", "/").split("/")
             folder = parts[-2] if len(parts) >= 2 else ""
             filename = parts[-1]
@@ -59,6 +66,7 @@ def run_batch(
                 result = run_pipeline(
                     str(dest),
                     page_type_config=page_type_config,
+                    page_assets=assets_by_folder.get(folder, {}),
                 )
             except Exception as exc:
                 entries.append(BatchEntry(
@@ -115,6 +123,32 @@ def run_batch(
             ))
 
     return BatchResult(filename_top=top_folder, entries=entries)
+
+
+def _partition_files_by_folder(
+    files: list[tuple[str, bytes]],
+) -> tuple[list[tuple[str, bytes]], dict[str, dict[str, bytes]]]:
+    """Split the flat file list into (docx_files, assets_by_folder).
+
+    docx_files preserves original order so pipeline runs match the
+    user's picked order in the UI. assets_by_folder is keyed by the
+    docx's OWN parent folder (last path segment before the filename)
+    -- exactly the segment `run_batch` uses when it labels the entry --
+    so per-page asset lookup stays scoped to a page's own subfolder.
+    A single Banner Image marker cannot silently reach an image sitting
+    in a sibling folder even when filenames match.
+    """
+    docxs: list[tuple[str, bytes]] = []
+    assets: dict[str, dict[str, bytes]] = {}
+    for rel_path, blob in files:
+        parts = rel_path.replace("\\", "/").split("/")
+        filename = parts[-1]
+        folder = parts[-2] if len(parts) >= 2 else ""
+        if filename.lower().endswith(".docx"):
+            docxs.append((rel_path, blob))
+        else:
+            assets.setdefault(folder, {})[filename] = blob
+    return docxs, assets
 
 
 def _pick_top_folder(files: list[tuple[str, bytes]]) -> str:

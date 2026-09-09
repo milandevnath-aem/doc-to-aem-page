@@ -21,8 +21,8 @@ from parser.word.v3_parser import _V3Parser
 # ponytail: hardcoded allow-list for now. Move to config/mappings/*.yaml once
 # the mapping layer exists (Sprint 3) so it's one source of truth instead of two.
 KNOWN_COMPONENTS = {
-    "hero-banner", "cards-with-full-width", "featurecards", "cardandrte",
-    "teasercomponent", "page-description", "faq",
+    "hero-banner", "new-hero-banner", "cards-with-full-width", "featurecards",
+    "cardandrte", "teasercomponent", "page-description", "faq",
 }
 REQUIRED_METADATA = {"title", "description"}
 # v3-format meta keys the parser fills into page.properties. old_url is

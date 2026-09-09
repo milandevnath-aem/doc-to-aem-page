@@ -172,3 +172,169 @@ def test_batch_result_carries_top_folder_label(tmp_path):
     result = run_batch(files, page_type_config=_sample_config())
     # top folder = first segment before subfolder + filename
     assert result.filename_top == "Articles"
+
+
+# ---- Phase 2B: folder assets threaded through the pipeline ----
+
+def _hero_banner_cfg() -> PageTypeConfig:
+    """Aligned with real client shape: template overlay with a hero
+    banner slot, mapping bound to `new-hero-banner`."""
+    return PageTypeConfig(
+        type="article",
+        template_path="/conf/x",
+        content_root="/content/site/articles",
+        dam_root="/content/dam/site/articles",
+        page_name_strategy="slug_from_meta_title",
+        component_mappings={
+            "new-hero-banner": {
+                "resourceType": "site/components/hero",
+                "fieldRenames": {"htmltext": "bannerDescription"},
+                "staticProperties": {
+                    "cardAlign": "left",
+                    "imagePath": "/content/dam/site/banner/default.png",
+                },
+            },
+        },
+        component_slots={
+            "new-hero-banner": "root/responsivegrid/new_hero_banner",
+        },
+        template_initial_content={
+            "name": "jcr:content", "primary_type": "cq:PageContent",
+            "properties": {"sling:resourceType": "site/components/page"},
+            "children": [{
+                "name": "root", "primary_type": "nt:unstructured",
+                "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+                "children": [{
+                    "name": "responsivegrid", "primary_type": "nt:unstructured",
+                    "properties": {"sling:resourceType": "wcm/foundation/components/responsivegrid"},
+                    "children": [{
+                        "name": "new_hero_banner",
+                        "primary_type": "nt:unstructured",
+                        "properties": {
+                            "sling:resourceType": "site/components/hero",
+                            "bannerTitle": "Template Default",
+                        },
+                        "children": [],
+                    }],
+                }],
+            }],
+        },
+    )
+
+
+def _write_hero_doc(path: Path, title: str, image_ref: str) -> None:
+    """Minimal v1/v2 doc that validates: `[metadata]` table (title +
+    description), then a `[component:new-hero-banner]` block with the
+    Banner Image marker and a description paragraph."""
+    document = docx.Document()
+    document.add_paragraph("[metadata]")
+    table = document.add_table(rows=3, cols=2)
+    table.cell(0, 0).text, table.cell(0, 1).text = "Property", "Value"
+    table.cell(1, 0).text, table.cell(1, 1).text = "title", title
+    table.cell(2, 0).text, table.cell(2, 1).text = "description", "Some desc"
+    p = document.add_paragraph()
+    p.add_run("[component:new-hero-banner]").add_break()
+    p.add_run(f"Banner Image: {image_ref}").add_break()
+    p.add_run().add_break()
+    p.add_run("A short banner description.")
+    document.save(str(path))
+
+
+def test_batch_wires_folder_assets_to_hero_banner_imagepath(tmp_path):
+    """Non-docx files in each subfolder ride the batch pipeline as page
+    assets. A hero-banner marker referencing one of those files -> that
+    file resolves to a DAM path on the mapped page, and an asset
+    descriptor is attached to the aem_tree for the packager."""
+    (tmp_path / "Article1").mkdir()
+    _write_hero_doc(tmp_path / "Article1" / "V2.docx",
+                    "Cashless Treatment", "car-insurance.jpg")
+    (tmp_path / "Article1" / "car-insurance.jpg").write_bytes(b"\x89PNG-bytes")
+
+    files = [
+        (str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+        for f in sorted(tmp_path.rglob("*")) if f.is_file()
+    ]
+
+    result = run_batch(files, page_type_config=_hero_banner_cfg())
+
+    # only one docx -> one pipeline entry (the jpg is an asset, not a page)
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.status == "passed"
+
+    # hero banner has imagePath set to the DAM path for the folder image
+    root = entry.aem_tree["children"][0]["children"][0]
+    grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
+    hero = next(c for c in grid["children"] if c["name"] == "new_hero_banner")
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/site/articles/car-insurance.jpg"
+
+    # asset descriptor rides on the tree for the packager
+    assets = entry.aem_tree.get("_assets", [])
+    assert len(assets) == 1
+    assert assets[0]["filename"] == "car-insurance.jpg"
+    assert assets[0]["bytes"] == b"\x89PNG-bytes"
+
+
+def test_batch_missing_folder_asset_keeps_template_default(tmp_path):
+    """Doc references `Banner Image: gone.jpg` but the folder has a
+    different image. Pipeline still produces a page (no failure), the
+    template default imagePath survives, no asset descriptor attached."""
+    (tmp_path / "Article1").mkdir()
+    _write_hero_doc(tmp_path / "Article1" / "V2.docx",
+                    "Article Title", "gone.jpg")
+    (tmp_path / "Article1" / "other.jpg").write_bytes(b"unrelated")
+
+    files = [
+        (str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+        for f in sorted(tmp_path.rglob("*")) if f.is_file()
+    ]
+
+    result = run_batch(files, page_type_config=_hero_banner_cfg())
+
+    entry = result.entries[0]
+    assert entry.status == "passed"
+    root = entry.aem_tree["children"][0]["children"][0]
+    grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
+    hero = next(c for c in grid["children"] if c["name"] == "new_hero_banner")
+    # template default (from staticProperties) preserved
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/site/banner/default.png"
+    assert entry.aem_tree.get("_assets", []) == []
+
+
+def test_batch_assets_scoped_per_folder_no_cross_leak(tmp_path):
+    """Article1's image must not resolve for Article2's banner marker.
+    Assets are grouped by first path segment (the subfolder name)."""
+    (tmp_path / "Article1").mkdir()
+    _write_hero_doc(tmp_path / "Article1" / "v.docx", "A1 Title", "img.jpg")
+    (tmp_path / "Article1" / "img.jpg").write_bytes(b"a1-bytes")
+
+    (tmp_path / "Article2").mkdir()
+    _write_hero_doc(tmp_path / "Article2" / "v.docx", "A2 Title", "img.jpg")
+    # no image in Article2 -- should NOT pick up Article1's img.jpg
+
+    files = [
+        (str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+        for f in sorted(tmp_path.rglob("*")) if f.is_file()
+    ]
+
+    result = run_batch(files, page_type_config=_hero_banner_cfg())
+
+    a1_entry = next(e for e in result.entries if e.folder == "Article1")
+    a2_entry = next(e for e in result.entries if e.folder == "Article2")
+
+    a1_hero_path = _dig_hero_imagepath(a1_entry.aem_tree)
+    a2_hero_path = _dig_hero_imagepath(a2_entry.aem_tree)
+
+    assert a1_hero_path == "/content/dam/site/articles/img.jpg"
+    # Article2's marker doesn't resolve -> template default survives
+    assert a2_hero_path == "/content/dam/site/banner/default.png"
+    assert a2_entry.aem_tree.get("_assets", []) == []
+
+
+def _dig_hero_imagepath(tree: dict) -> str:
+    root = tree["children"][0]["children"][0]
+    grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
+    hero = next(c for c in grid["children"] if c["name"] == "new_hero_banner")
+    return hero["properties"].get("imagePath", "")

@@ -32,6 +32,7 @@ def run_pipeline(
     assets_dir: str | None = None,
     format: str | None = None,
     page_type_config: PageTypeConfig | None = None,
+    page_assets: dict[str, bytes] | None = None,
 ) -> RunResult:
     filename = Path(docx_path).name
 
@@ -49,7 +50,9 @@ def run_pipeline(
     if not has_errors or force:
         ncm = parse_docx(docx_path, assets_dir=assets_dir, format=format)
         if page_type_config is not None:
-            aem_tree = map_ncm_to_node_tree(ncm, page_type_config)
+            aem_tree = map_ncm_to_node_tree(
+                ncm, page_type_config, page_assets=page_assets,
+            )
 
     return RunResult(
         status=status, filename=filename,
