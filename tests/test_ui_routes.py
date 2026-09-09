@@ -641,9 +641,9 @@ def test_run_batch_route_uploads_multiple_docx_and_redirects(tmp_path, monkeypat
         return buf
 
     files = [
-        ("docx_files", ("Articles/Article1/one.docx", make_v3("First"),
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        ("docx_files", ("Articles/Article2/two.docx", make_v3("Second"),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     ]
 
@@ -667,7 +667,7 @@ def test_run_batch_route_rejects_when_no_docx(tmp_path, monkeypatch):
     client = TestClient(app_module.app)
     resp = client.post(
         "/run-batch",
-        files=[("docx_files", ("readme.txt", io.BytesIO(b"hi"), "text/plain"))],
+        files=[("all_files", ("readme.txt", io.BytesIO(b"hi"), "text/plain"))],
     )
     assert resp.status_code == 400
 
@@ -691,9 +691,9 @@ def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
         return buf
 
     files = [
-        ("docx_files", ("Articles/Article1/one.docx", make_v3("First Article"),
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        ("docx_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     ]
     client = TestClient(app_module.app)

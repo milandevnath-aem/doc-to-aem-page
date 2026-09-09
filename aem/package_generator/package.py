@@ -5,17 +5,32 @@ Output layout:
     META-INF/vault/filter.xml         # which JCR paths this package covers
     META-INF/vault/properties.xml     # group / name / version metadata
     jcr_root/<path>/.content.xml      # the page's node subtree
+    jcr_root/<dam_path>/.content.xml  # dam:Asset descriptor (Phase 2B)
+    jcr_root/<dam_path>/_jcr_content/renditions/original  # binary payload
 
 Byte-deterministic -- fixed zip entry timestamps + sorted entry order,
 so the same tree + meta always produces the same bytes. Useful for
 diff-based review and CI reproducibility.
 """
 
+import os
 import zipfile
 from dataclasses import dataclass
 from io import BytesIO
 
 from aem.package_generator.filevault import node_to_content_xml
+
+# Filename-extension -> MIME type. FileVault stores this on the
+# rendition's nt:resource; AEM's DAM lists + Sites author UI both read
+# it from there when rendering assets.
+_MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
 
 # Fixed timestamp so builds are reproducible. Uses zipfile's canonical
 # "no timestamp" marker (1980-01-01) which every unzipper accepts.
@@ -71,13 +86,39 @@ def _multi_filter_xml(page_paths: list[str]) -> str:
 def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
     """Multi-page variant of build_package: one .zip covers N pages, the
     filter.xml lists one root per page so a single install writes them
-    all without clobbering unrelated siblings."""
-    entries: dict[str, str] = {
-        "META-INF/vault/filter.xml": _multi_filter_xml([t["path"] for t in trees]),
+    all without clobbering unrelated siblings.
+
+    When a tree carries `_assets` (Phase 2B), the packager emits a
+    dam:Asset `.content.xml` + raw-binary pair for each asset and adds
+    its DAM path to the filter list too. The `_assets` key itself is
+    stripped from the tree before serialization so it never leaks into
+    the page XML as an unknown JCR property.
+    """
+    all_asset_paths: list[str] = []
+    entries: dict[str, str | bytes] = {
         "META-INF/vault/properties.xml": _properties_xml(meta),
     }
     for tree in trees:
+        # Read `_assets` without mutating the caller's tree -- repeat
+        # builds must return byte-identical output, so a second call
+        # after we popped the key would silently emit a different zip.
+        # `node_to_content_xml` ignores non-standard top-level keys, so
+        # `_assets` sitting on the dict does NOT leak into the XML.
+        assets = tree.get("_assets") if isinstance(tree, dict) else None
         entries[f"jcr_root{tree['path']}/.content.xml"] = node_to_content_xml(tree)
+        if not assets:
+            continue
+        for asset in assets:
+            dam_path = asset["dam_path"]
+            all_asset_paths.append(dam_path)
+            entries[f"jcr_root{dam_path}/.content.xml"] = _dam_asset_xml(asset["filename"])
+            entries[f"jcr_root{dam_path}/_jcr_content/renditions/original"] = asset["bytes"]
+
+    # Filter roots emit in a stable order so the built package stays
+    # byte-identical for identical inputs.
+    filter_roots = [t["path"] for t in trees] + all_asset_paths
+    entries["META-INF/vault/filter.xml"] = _multi_filter_xml(filter_roots)
+
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(entries):
@@ -85,6 +126,31 @@ def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
             info.compress_type = zipfile.ZIP_DEFLATED
             zf.writestr(info, entries[path])
     return buf.getvalue()
+
+
+def _dam_asset_xml(filename: str) -> str:
+    """FileVault `.content.xml` describing a dam:Asset node whose only
+    rendition is `original`, an nt:file whose jcr:content (nt:resource)
+    carries the mime type. FileVault matches the sibling
+    `_jcr_content/renditions/original` binary entry to that nt:resource
+    at install time and populates jcr:data with the bytes."""
+    ext = os.path.splitext(filename)[1].lower()
+    mime = _MIME_BY_EXT.get(ext, "application/octet-stream")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<jcr:root xmlns:jcr="http://www.jcp.org/jcr/1.0"'
+        ' xmlns:dam="http://www.day.com/dam/1.0"'
+        ' xmlns:nt="http://www.jcp.org/jcr/nt/1.0"\n'
+        '    jcr:primaryType="dam:Asset">\n'
+        '    <jcr:content jcr:primaryType="dam:AssetContent">\n'
+        '        <renditions jcr:primaryType="nt:folder">\n'
+        '            <original jcr:primaryType="nt:file">\n'
+        f'                <jcr:content jcr:primaryType="nt:resource" jcr:mimeType="{mime}"/>\n'
+        '            </original>\n'
+        '        </renditions>\n'
+        '    </jcr:content>\n'
+        '</jcr:root>\n'
+    )
 
 
 def _properties_xml(meta: PackageMeta) -> str:

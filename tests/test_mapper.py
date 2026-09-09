@@ -594,3 +594,153 @@ def test_map_full_v3_shape_end_to_end():
     faq = root_children[1]
     assert faq["children"][0]["name"] == "item_0"
     assert faq["children"][0]["properties"]["question"] == "Q1?"
+
+
+# ---- Phase 2B: banner-image asset resolution ----
+
+def _article_cfg_with_hero_banner_slot() -> PageTypeConfig:
+    """Article config aligned with the real client shape: hero-banner
+    slot points at the template's `new_hero_banner` node, mapping declares
+    the field renames, static image path is the placeholder default the
+    template already carries."""
+    cfg = _article_config()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "new-hero-banner": "root/responsivegrid/new_hero_banner",
+    }
+    cfg.component_mappings["new-hero-banner"] = {
+        "resourceType": "iffcotokio/components/content/hero-banner-compnent/new-hero-banner",
+        "fieldRenames": {"htmltext": "bannerDescription"},
+        "staticProperties": {
+            "cardAlign": "left",
+            "imagePath": "/content/dam/iffcotokio/banner/default.png",
+        },
+    }
+    return cfg
+
+
+def _hero_ncm(image_file: str | None = "car-insurance.jpg") -> dict:
+    fields: dict = {"htmltext": "<p>Banner copy.</p>"}
+    if image_file is not None:
+        fields["imageFile"] = image_file
+    return _ncm(
+        page_props={"title": "Cashless Meta Title"},
+        blocks=[
+            {"type": "component", "name": "new-hero-banner", "variant": None,
+             "fields": fields, "items": [], "table": None},
+        ],
+    )
+
+
+def _hero_node(tree: dict) -> dict:
+    root = tree["children"][0]["children"][0]
+    grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
+    return next(c for c in grid["children"] if c["name"] == "new_hero_banner")
+
+
+def test_map_wires_banner_image_asset_to_imagepath_and_records_descriptor():
+    """`imageFile` marker + matching folder asset -> `imagePath` set to
+    the DAM path on the mapped hero-banner node, and an asset descriptor
+    is recorded at tree[_assets] so the packager knows what to bundle.
+    The internal `imageFile` marker must NEVER leak into JCR."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    tree = map_ncm_to_node_tree(
+        _hero_ncm(),
+        cfg,
+        page_assets={"car-insurance.jpg": b"\x89PNG-fake-bytes"},
+    )
+    hero = _hero_node(tree)
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/iffcotokio/articles/car-insurance.jpg"
+    assert hero["properties"]["bannerDescription"] == "<p>Banner copy.</p>"
+    assert "imageFile" not in hero["properties"]
+
+    assets = tree.get("_assets", [])
+    assert len(assets) == 1
+    assert assets[0]["dam_path"] == \
+        "/content/dam/iffcotokio/articles/car-insurance.jpg"
+    assert assets[0]["filename"] == "car-insurance.jpg"
+    assert assets[0]["bytes"] == b"\x89PNG-fake-bytes"
+
+
+def test_map_missing_banner_asset_keeps_template_default_imagepath():
+    """When the doc references `Banner Image: missing.jpg` but the folder
+    does not carry it, the mapper must NOT set imagePath -- the template
+    initial + staticProperty default supplies the fallback. No asset
+    descriptor recorded either (nothing to bundle)."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    tree = map_ncm_to_node_tree(
+        _hero_ncm(image_file="missing.jpg"),
+        cfg,
+        page_assets={"other-image.jpg": b"unrelated"},
+    )
+    hero = _hero_node(tree)
+    # staticProperty default preserved -- template default kicks in
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/iffcotokio/banner/default.png"
+    assert "imageFile" not in hero["properties"]
+    assert tree.get("_assets", []) == []
+
+
+def test_map_banner_asset_lookup_is_case_insensitive():
+    """Author writes `Banner Image: Car-Insurance.JPG`, folder holds
+    `car-insurance.jpg` -- still resolves. Filename in the DAM path
+    reflects what's ON DISK (the packager will bundle THAT byte payload,
+    so its name is what matters)."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    tree = map_ncm_to_node_tree(
+        _hero_ncm(image_file="Car-Insurance.JPG"),
+        cfg,
+        page_assets={"car-insurance.jpg": b"bytes"},
+    )
+    hero = _hero_node(tree)
+    assert hero["properties"]["imagePath"].endswith("/car-insurance.jpg")
+
+
+def test_map_banner_asset_uses_sub_base_bucket_when_flag_enabled():
+    """`enable_sub_base_image_sorting=True` -> `<dam_root>/<slug>/<file>`."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    cfg.enable_sub_base_image_sorting = True
+    tree = map_ncm_to_node_tree(
+        _hero_ncm(),
+        cfg,
+        page_assets={"car-insurance.jpg": b"bytes"},
+    )
+    # meta title is "Cashless Meta Title" -> slug "cashless-meta-title"
+    hero = _hero_node(tree)
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/iffcotokio/articles/cashless-meta-title/car-insurance.jpg"
+
+
+def test_map_no_page_assets_still_strips_imagefile_marker():
+    """Backwards compat: single-doc UI calls map_ncm_to_node_tree without
+    page_assets. The `imageFile` marker still must be stripped -- it's
+    an internal parser signal, never a JCR property."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    tree = map_ncm_to_node_tree(_hero_ncm(), cfg)  # no page_assets
+    hero = _hero_node(tree)
+    assert "imageFile" not in hero["properties"]
+    # template default preserved (imagePath never overridden)
+    assert hero["properties"]["imagePath"] == \
+        "/content/dam/iffcotokio/banner/default.png"
+    # no asset bundled
+    assert tree.get("_assets", []) == []
+
+
+def test_map_hero_banner_title_from_meta_title():
+    """Per Q5 decision: bannerTitle sources from Meta Title, not any
+    block-level title field. The mapper already reads page.properties.title
+    into jcr:title; this test locks in that the hero banner picks up the
+    same value via the templated `bannerTitle` when static or field-rename
+    doesn't already supply one."""
+    cfg = _article_cfg_with_hero_banner_slot()
+    # mapping tells the hero to sink meta title into bannerTitle
+    cfg.component_mappings["new-hero-banner"]["fieldRenames"]["metaTitle"] = "bannerTitle"
+    ncm = _hero_ncm()
+    # simulate mapper propagating meta title into the block's fields
+    ncm["blocks"][0]["fields"]["metaTitle"] = ncm["page"]["properties"]["title"]
+    tree = map_ncm_to_node_tree(
+        ncm, cfg, page_assets={"car-insurance.jpg": b"b"},
+    )
+    hero = _hero_node(tree)
+    assert hero["properties"]["bannerTitle"] == "Cashless Meta Title"

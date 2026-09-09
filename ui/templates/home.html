@@ -126,13 +126,14 @@
 
 <h2>Batch upload folder</h2>
 <p><small>Pick a top folder containing one subfolder per page. Each
-subfolder holds one <code>.docx</code> (assets in the same subfolder are
-ignored for now — Phase 2B). Every docx runs through the pipeline and all
-successful pages ship as one installable package.</small></p>
+subfolder holds one <code>.docx</code> plus any assets it references
+(images matched by <code>Banner Image:</code> lines in the doc). Every
+docx runs through the pipeline; all successful pages plus their
+resolved assets ship as one installable package.</small></p>
 <form id="batchForm" method="post" enctype="multipart/form-data">
     <p>
         <label for="batchFolder">Folder</label><br>
-        <input type="file" id="batchFolder" webkitdirectory directory multiple accept=".docx">
+        <input type="file" id="batchFolder" webkitdirectory directory multiple>
     </p>
     <button type="submit">Run batch</button>
     <p id="batchStatus"><small></small></p>
@@ -142,17 +143,23 @@ document.getElementById("batchForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const input = document.getElementById("batchFolder");
     const status = document.getElementById("batchStatus").querySelector("small");
-    const files = [...input.files].filter(f => f.name.toLowerCase().endsWith(".docx"));
-    if (files.length === 0) {
+    // Send EVERY file the user picked -- docx + siblings (images, etc.).
+    // Server groups by first-path-segment to scope assets per page.
+    const files = [...input.files];
+    const docxCount = files.filter(f => f.name.toLowerCase().endsWith(".docx")).length;
+    if (docxCount === 0) {
         status.textContent = "No .docx found in the picked folder.";
         return;
     }
-    status.textContent = `Uploading ${files.length} docx file${files.length === 1 ? "" : "s"}...`;
+    const assetCount = files.length - docxCount;
+    status.textContent = `Uploading ${docxCount} docx + ${assetCount} asset` +
+        `${assetCount === 1 ? "" : "s"}...`;
     const fd = new FormData();
     for (const f of files) {
-        // send each file with its webkitRelativePath in place of just the basename
-        // so the server sees <top>/<subfolder>/<name>.docx
-        fd.append("docx_files", f, f.webkitRelativePath || f.name);
+        // Send each file with its webkitRelativePath in place of just the
+        // basename so the server sees <top>/<subfolder>/<name>.<ext> and
+        // can group by <subfolder>.
+        fd.append("all_files", f, f.webkitRelativePath || f.name);
     }
     const resp = await fetch("/run-batch", { method: "POST", body: fd, redirect: "follow" });
     if (resp.redirected) {

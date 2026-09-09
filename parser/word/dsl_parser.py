@@ -46,6 +46,32 @@ MARKER_RE = re.compile(r"^\[([\w -]+)\]$")
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]{0,40}):-?\s*(.*)$")
 IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|svg|gif|webp)$", re.I)
 
+# Real client docs mix v1/v2 `[component:]` markers with v3-style inline
+# metadata (Meta Title:, Meta Description:, ...) at the top of the file,
+# no `[metadata]` marker/table in sight. Recognize the same keys the v3
+# parser handles so bannerTitle / jcr:title / seoDescription have values
+# to source from in this hybrid.
+_V3_STYLE_META_RE = re.compile(
+    r"^(Old URL|New Required URL|Meta Title|Meta Description|Meta keywords)\s*:\s*(.*)$",
+    re.I,
+)
+_V3_STYLE_META_KEY_MAP = {
+    "old url": "old_url",
+    "new required url": "url",
+    "meta title": "title",
+    "meta description": "description",
+    "meta keywords": "keywords",
+}
+
+# ponytail: component-specific asset marker for new-hero-banner. The line
+# `Banner Image: <file>` inside a `[component:new-hero-banner]` block names
+# the DAM asset in the same folder to wire into the component's imagePath.
+# Not added to ALLOWED_KEYS globally: other components would silently accept
+# `Image: foo.jpg` as a real field. Extend to more components when a second
+# one asks for the same pattern.
+BANNER_IMAGE_RE = re.compile(r"^banner\s+image:\s*(\S.+?\.(?:png|jpe?g|svg|gif|webp))\s*$", re.I)
+_BANNER_IMAGE_COMPONENTS = {"new-hero-banner"}
+
 _BLIP_QN = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
 _EMBED_QN = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
 _WRITABLE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
@@ -252,6 +278,25 @@ class _DslParser:
     def handle_plain_line(self, text: str, spans: list[tuple[str, dict]]):
         if self._component is None:
             return
+        # Component-specific asset marker MUST run before implicit/RTE dumping,
+        # otherwise the "Banner Image: foo.jpg" line ends up as the block's
+        # implicit title (first unkeyed line) OR gets folded into the RTE
+        # description.
+        if (
+            self._component["name"] in _BANNER_IMAGE_COMPONENTS
+            and self._item is None
+        ):
+            m = BANNER_IMAGE_RE.match(text)
+            if m:
+                self._component["fields"]["imageFile"] = m.group(1).strip()
+                # Every subsequent unkeyed line inside a new-hero-banner
+                # block IS the banner description RTE. Activating the field
+                # up front prevents `_handle_implicit_line` from stealing
+                # the first prose paragraph as an implicit `title` (a title
+                # the mapper wouldn't use anyway -- it takes bannerTitle
+                # from the doc's Meta Title).
+                self._active_field = "description"
+                return
         if self._active_field is None:
             self._handle_implicit_line(text, spans)
             return
@@ -282,6 +327,11 @@ class _DslParser:
         # Word Heading-styled paragraphs at the component level are treated as
         # RTE content of the active field when one is open. Absent an active
         # field they fold into the component's htmltext under an <hN> tag.
+        # A heading BEFORE any component (page title in v3-style hybrid docs)
+        # is dropped -- the mapper takes bannerTitle / jcr:title from the
+        # captured Meta Title, not from a stray H1.
+        if self._component is None:
+            return
         target_fields = self._target_fields()
         if self._active_field in RTE_FIELDS:
             blocks = target_fields.setdefault(self._active_field, [])
@@ -341,6 +391,8 @@ class _DslParser:
                 continue
             if self.handle_marker_line(line):
                 continue
+            if self._try_capture_v3_style_meta(line):
+                continue
             if self.handle_key_line(line, spans):
                 continue
             if style_name.startswith("Heading"):
@@ -351,6 +403,24 @@ class _DslParser:
                 self.handle_bullet_line(line, spans)
             else:
                 self.handle_plain_line(line, spans)
+
+    def _try_capture_v3_style_meta(self, line: str) -> bool:
+        """Capture v3-style inline meta keys as page.properties whenever
+        the walker is NOT inside a component (real client hybrid docs
+        put these at the top of the file with no `[metadata]` table).
+        Returns True to short-circuit further per-line handling."""
+        if self._component is not None:
+            return False
+        m = _V3_STYLE_META_RE.match(line)
+        if not m:
+            return False
+        normalized = _V3_STYLE_META_KEY_MAP.get(m.group(1).lower())
+        if not normalized:
+            return False
+        # first-wins so a second occurrence of the same key can't stomp
+        # what the operator wrote first
+        self.page_properties.setdefault(normalized, m.group(2).strip())
+        return True
 
     def _finalize_rte(self, fields: dict):
         # Serialize any accumulated RTE blocks (description, body, ...) and

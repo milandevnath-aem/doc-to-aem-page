@@ -63,6 +63,11 @@ class PageTypeConfig:
     # Empty dict when no template has been fetched -- mapper then falls
     # back to flat-layout mode.
     template_initial_content: dict = field(default_factory=dict)
+    # Phase 2B asset packaging: when True, page assets land at
+    # <dam_root>/<page-slug>/<filename> so pages can't collide on shared
+    # filenames. Default False = flat layout <dam_root>/<filename>, which
+    # matches the existing hand-authored asset convention.
+    enable_sub_base_image_sorting: bool = False
 
     # ----- camelCase / JCR-key input from AEM CF -> snake_case fields ----
     _RENAME = {
@@ -75,6 +80,7 @@ class PageTypeConfig:
         "containerResourceType": "container_resource_type",
         "componentSlots": "component_slots",
         "templateInitialContent": "template_initial_content",
+        "enableSubBaseImageSorting": "enable_sub_base_image_sorting",
     }
 
     def __post_init__(self):
@@ -111,6 +117,19 @@ class PageTypeConfig:
                     "missing 'resourceType'"
                 )
         return cls(**normalized)
+
+    def asset_dam_path(self, page_slug: str, filename: str) -> str:
+        """Compute where a page's asset lands in DAM.
+
+        Off / absent flag -> `<dam_root>/<filename>` (flat, matches existing
+        client convention). Flag on -> `<dam_root>/<page_slug>/<filename>`
+        so cross-page filename clashes can't overwrite each other. Filename
+        is preserved verbatim so the installed asset name matches what the
+        author sees on disk.
+        """
+        if self.enable_sub_base_image_sorting:
+            return f"{self.dam_root.rstrip('/')}/{page_slug}/{filename}"
+        return f"{self.dam_root.rstrip('/')}/{filename}"
 
 
 def _read_json(path: Path) -> dict:

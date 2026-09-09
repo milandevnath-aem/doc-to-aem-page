@@ -7,11 +7,14 @@
   "containerResourceType": "iffcotokio/components/parsys",
   "pageNameStrategy": "slug_from_meta_title",
   "componentMappings": {
-    "hero-banner": {
-      "resourceType": "iffcotokio/components/herobanner",
+    "new-hero-banner": {
+      "resourceType": "iffcotokio/components/content/hero-banner-compnent/new-hero-banner",
       "fieldRenames": {
-        "title": "headline",
-        "htmltext": "bodyText"
+        "title": "bannerTitle",
+        "htmltext": "bannerDescription"
+      },
+      "staticProperties": {
+        "cardAlign": "left"
       }
     },
     "page-description": "iffcotokio/components/text",

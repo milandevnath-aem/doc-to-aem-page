@@ -140,3 +140,138 @@ def test_package_meta_defaults_to_sensible_values():
         props = zf.read("META-INF/vault/properties.xml").decode("utf-8")
     assert "<entry key=\"group\">iffcotokio-content-automation</entry>" in props
     assert "<entry key=\"version\">1.0.0</entry>" in props
+
+
+# ---- Phase 2B: DAM asset packaging ----
+
+def _tree_with_asset(dam_path: str, filename: str, blob: bytes) -> dict:
+    return {
+        "name": "the-page", "path": "/content/site/articles/the-page",
+        "primary_type": "cq:Page", "properties": {},
+        "children": [{"name": "jcr:content", "primary_type": "cq:PageContent",
+                      "properties": {"jcr:title": "T"}, "children": []}],
+        "_assets": [{"dam_path": dam_path, "filename": filename, "bytes": blob}],
+    }
+
+
+def test_batch_package_includes_dam_asset_content_xml_and_binary():
+    """A tree carrying `_assets` -> the package layers in a dam:Asset
+    `.content.xml` AND the raw binary at the FileVault-expected path
+    (`_jcr_content/renditions/original`)."""
+    from aem.package_generator.package import build_batch_package
+
+    tree = _tree_with_asset(
+        dam_path="/content/dam/site/articles/car-insurance.jpg",
+        filename="car-insurance.jpg",
+        blob=b"\x89PNG-fake-bytes",
+    )
+    data = build_batch_package([tree], _meta())
+
+    with _read_zip(data) as zf:
+        names = set(zf.namelist())
+        # dam:Asset descriptor
+        asset_xml_path = (
+            "jcr_root/content/dam/site/articles/car-insurance.jpg/.content.xml"
+        )
+        assert asset_xml_path in names
+        asset_xml = zf.read(asset_xml_path).decode("utf-8")
+        assert 'jcr:primaryType="dam:Asset"' in asset_xml
+        assert 'jcr:primaryType="dam:AssetContent"' in asset_xml
+        assert 'jcr:mimeType="image/jpeg"' in asset_xml
+        # raw binary picked up by FileVault at install time
+        binary_path = (
+            "jcr_root/content/dam/site/articles/car-insurance.jpg"
+            "/_jcr_content/renditions/original"
+        )
+        assert binary_path in names
+        assert zf.read(binary_path) == b"\x89PNG-fake-bytes"
+
+
+def test_batch_package_filter_xml_adds_root_per_asset():
+    """Every packaged asset gets its own <filter root=...> so the install
+    covers it without accidentally sweeping in unrelated DAM siblings."""
+    from aem.package_generator.package import build_batch_package
+
+    tree = _tree_with_asset(
+        dam_path="/content/dam/site/articles/img.jpg",
+        filename="img.jpg", blob=b"x",
+    )
+    data = build_batch_package([tree], _meta())
+
+    with _read_zip(data) as zf:
+        filter_xml = zf.read("META-INF/vault/filter.xml").decode()
+    assert '<filter root="/content/site/articles/the-page"/>' in filter_xml
+    assert '<filter root="/content/dam/site/articles/img.jpg"/>' in filter_xml
+
+
+def test_batch_package_asset_mimetype_by_extension():
+    """MIME type is derived from the filename extension, case-insensitive."""
+    from aem.package_generator.package import build_batch_package
+
+    cases = {
+        "hero.PNG": "image/png",
+        "banner.jpg": "image/jpeg",
+        "banner.jpeg": "image/jpeg",
+        "logo.svg": "image/svg+xml",
+        "anim.gif": "image/gif",
+        "next.webp": "image/webp",
+    }
+    for filename, mime in cases.items():
+        tree = _tree_with_asset(
+            dam_path=f"/content/dam/site/{filename}",
+            filename=filename, blob=b"x",
+        )
+        data = build_batch_package([tree], _meta())
+        with _read_zip(data) as zf:
+            xml = zf.read(
+                f"jcr_root/content/dam/site/{filename}/.content.xml"
+            ).decode()
+        assert f'jcr:mimeType="{mime}"' in xml, filename
+
+
+def test_batch_package_strips_internal_assets_key_from_page_xml():
+    """`_assets` is an internal packager signal -- it MUST NOT appear
+    in the page's serialized .content.xml (would leak an unknown JCR
+    property and fail install)."""
+    from aem.package_generator.package import build_batch_package
+
+    tree = _tree_with_asset(
+        dam_path="/content/dam/site/img.jpg",
+        filename="img.jpg", blob=b"x",
+    )
+    data = build_batch_package([tree], _meta())
+    with _read_zip(data) as zf:
+        page_xml = zf.read(
+            "jcr_root/content/site/articles/the-page/.content.xml"
+        ).decode()
+    assert "_assets" not in page_xml
+
+
+def test_batch_package_no_assets_key_is_unchanged():
+    """Trees without `_assets` produce the same package they always did
+    -- no DAM entries, filter xml unchanged."""
+    from aem.package_generator.package import build_batch_package
+
+    tree = {
+        "name": "p", "path": "/content/site/p",
+        "primary_type": "cq:Page", "properties": {},
+        "children": [{"name": "jcr:content", "primary_type": "cq:PageContent",
+                      "properties": {}, "children": []}],
+    }
+    data = build_batch_package([tree], _meta())
+    with _read_zip(data) as zf:
+        names = set(zf.namelist())
+    assert not any("dam" in n for n in names)
+
+
+def test_batch_package_with_assets_is_deterministic():
+    """Same tree+asset -> byte-identical package. Enables diff-based
+    review and reproducible CI builds when assets are involved."""
+    from aem.package_generator.package import build_batch_package
+
+    tree = _tree_with_asset(
+        dam_path="/content/dam/site/img.jpg",
+        filename="img.jpg", blob=b"deterministic-payload",
+    )
+    m = _meta()
+    assert build_batch_package([tree], m) == build_batch_package([tree], m)
