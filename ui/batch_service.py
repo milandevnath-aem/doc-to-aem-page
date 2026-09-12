@@ -134,10 +134,7 @@ def run_batch(
                     folder=folder, filename=filename, page_path="",
                     status="unresolved",
                     issues=result.issues,
-                    error=("Could not derive a page name from the doc "
-                           "(no URL, no Meta Title, no other seed for the "
-                           "active pageNameStrategy). Fix the doc metadata "
-                           "and re-upload."),
+                    error=_unresolved_reason(result, page_type_config),
                 ))
                 continue
 
@@ -215,6 +212,33 @@ def _pick_top_folder(files: list[tuple[str, bytes]]) -> str:
         if path.replace("\\", "/").split("/")[0] != first:
             return ""
     return first
+
+
+def _unresolved_reason(result, page_type_config: PageTypeConfig | None) -> str:
+    """Explain why no page slug could be derived.
+
+    Under `slug_from_url`, `split_site_url` returns no slug both when the
+    doc has no URL at all AND when the URL just doesn't sit under the
+    configured `site_origin` -- and `site_origin` defaults to "", so an
+    operator who hasn't set it yet would otherwise see every page blamed
+    on "doc metadata" when the doc is fine and the config isn't set.
+    Distinguish the two so the operator looks in the right place.
+    """
+    strategy = page_type_config.page_name_strategy if page_type_config else None
+    if strategy == "slug_from_url":
+        url = ((result.ncm or {}).get("page", {}).get("properties", {})
+               .get("url") or "").strip()
+        if not url:
+            return ("Could not derive a page name: the doc has no page URL "
+                    "(active pageNameStrategy is slug_from_url). Add a URL "
+                    "to the doc metadata and re-upload.")
+        return (f"Could not derive a page name: the doc's URL ('{url}') "
+                f"does not match the configured siteOrigin "
+                f"('{page_type_config.site_origin}'). Check siteOrigin in "
+                "the AEM config -- the doc metadata may be fine.")
+    return ("Could not derive a page name from the doc "
+            "(no URL, no Meta Title, no other seed for the active "
+            "pageNameStrategy). Fix the doc metadata and re-upload.")
 
 
 def _first_error(issues: list[dict]) -> str | None:

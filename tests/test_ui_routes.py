@@ -728,6 +728,57 @@ def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
     assert filter_xml.count("<filter root=") == 2
 
 
+def test_batch_report_zip_downloads_both_csvs(tmp_path, monkeypatch):
+    """POST 2 docx -> download /batch-runs/{id}/report.zip -> both CSVs
+    present, header confirms column order. Cache dir isolated same as the
+    batch package test above."""
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+
+    import docx as docx_lib
+    def make_v3(title):
+        d = docx_lib.Document()
+        d.add_paragraph().add_run(title).bold = True
+        d.add_paragraph(f"Meta Title: {title}")
+        d.add_paragraph("Meta Description: desc")
+        d.add_paragraph("Meta keywords: kw")
+        d.add_paragraph("Body.")
+        buf = io.BytesIO()
+        d.save(buf)
+        buf.seek(0)
+        return buf
+
+    files = [
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+    ]
+    client = TestClient(app_module.app)
+    resp = client.post("/run-batch", files=files, follow_redirects=False)
+    location = resp.headers["location"]
+    run_id = location.rsplit("/", 1)[-1]
+
+    response = client.get(f"/batch-runs/{run_id}/report.zip")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "attachment" in response.headers["content-disposition"]
+
+    import zipfile
+    from io import BytesIO
+    with zipfile.ZipFile(BytesIO(response.content)) as zf:
+        assert sorted(zf.namelist()) == ["faqs.csv", "pages.csv"]
+        header = zf.read("pages.csv").decode("utf-8-sig").splitlines()[0]
+        assert header.startswith("doc,folder,status,url,page_path")
+
+
+def test_batch_report_zip_unknown_run_is_404():
+    client = TestClient(app_module.app)
+    assert client.get("/batch-runs/does-not-exist/report.zip").status_code == 404
+
+
 def test_history_page_empty_state():
     client = TestClient(app_module.app)
 

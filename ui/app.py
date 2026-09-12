@@ -25,6 +25,7 @@ from aem_client.config import (
 )
 from aem_client.fetcher import FetchError, fetch_or_cached
 from ui.batch_service import run_batch
+from ui.report import build_report_zip
 from ui.runs import (
     get_batch_run, get_run, list_runs,
     save_batch_run, save_run,
@@ -257,6 +258,20 @@ def download_batch_package(run_id: str):
         content=data,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{meta.name}.zip"'},
+    )
+
+
+@app.get("/batch-runs/{run_id}/report.zip")
+def download_batch_report(run_id: str):
+    record = get_batch_run(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Batch run not found.")
+    data = build_report_zip(record)
+    name = (record.filename_top or "batch") + "-report"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
     )
 
 

@@ -162,6 +162,68 @@ def test_batch_unresolved_pages_are_excluded_from_slug_collision_set(tmp_path):
     assert [e.status for e in result.entries] == ["unresolved", "unresolved", "unresolved"]
 
 
+def _slug_from_url_config(site_origin: str = "https://www.iffcotokio.co.in") -> PageTypeConfig:
+    return PageTypeConfig(
+        type="article",
+        template_path="/conf/x",
+        content_root="/content/site/articles",
+        dam_root="/content/dam/site/articles",
+        page_name_strategy="slug_from_url",
+        component_mappings={"page-description": "site/components/text"},
+        site_origin=site_origin,
+    )
+
+
+def _write_v3_doc_with_url(path: Path, title: str, url: str | None) -> None:
+    document = docx.Document()
+    document.add_paragraph().add_run(title).bold = True
+    if url:
+        document.add_paragraph(f"New Required URL: {url}")
+    document.add_paragraph(f"Meta Title: {title}")
+    document.add_paragraph("Meta Description: Some description.")
+    document.add_paragraph("Meta keywords: kw")
+    document.add_paragraph("Body.")
+    document.save(str(path))
+
+
+def test_batch_unresolved_reason_names_missing_url_under_slug_from_url(tmp_path):
+    """slug_from_url with no URL at all in the doc -- the message must say
+    the doc has no URL, not point at an unrelated config value."""
+    (tmp_path / "A1").mkdir()
+    _write_v3_doc_with_url(tmp_path / "A1" / "no-url.docx", "Some Title", url=None)
+
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in tmp_path.rglob("*.docx")]
+
+    result = run_batch(files, page_type_config=_slug_from_url_config())
+
+    assert result.entries[0].status == "unresolved"
+    reason = result.entries[0].error.lower()
+    assert "no page url" in reason
+    assert "siteorigin" not in reason
+
+
+def test_batch_unresolved_reason_names_site_origin_mismatch_under_slug_from_url(tmp_path):
+    """slug_from_url with a URL present but not on the configured
+    siteOrigin -- the message must name siteOrigin as the thing to check,
+    not blame the doc's own metadata."""
+    (tmp_path / "A1").mkdir()
+    _write_v3_doc_with_url(
+        tmp_path / "A1" / "wrong-origin.docx", "Some Title",
+        url="https://example.com/health-insurance/who-buys")
+
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in tmp_path.rglob("*.docx")]
+
+    result = run_batch(files, page_type_config=_slug_from_url_config(
+        site_origin="https://www.iffcotokio.co.in"))
+
+    assert result.entries[0].status == "unresolved"
+    reason = result.entries[0].error.lower()
+    assert "siteorigin" in reason
+    assert "https://example.com/health-insurance/who-buys" in result.entries[0].error
+
+
 def test_batch_result_carries_top_folder_label(tmp_path):
     (tmp_path / "Articles" / "A1").mkdir(parents=True)
     _write_v3_doc(tmp_path / "Articles" / "A1" / "doc.docx", "One")
