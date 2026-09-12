@@ -9,6 +9,8 @@ fetched or loaded from samples.
 """
 
 
+import json
+
 import pytest
 
 from aem_client.config import (
@@ -379,3 +381,41 @@ def test_page_type_config_from_dict_builds_nested_faq_config():
     assert isinstance(cfg.faq, FaqConfig)
     assert cfg.faq.cf_root == "/content/dam/iffcotokio/content-fragments/faq"
     assert cfg.faq.cf_model == "/conf/iffcotokio/settings/dam/cfm/models/faq-template"
+
+
+def test_page_type_config_cache_round_trip_rebuilds_faq_config(tmp_path):
+    """Regression: save_page_type_config's asdict() flattens the nested
+    FaqConfig to a plain dict; load_page_type_config must route through
+    from_dict to rebuild it as a real FaqConfig, not leave it as a dict
+    (which crashes the first time anything does cfg.faq.cf_root)."""
+    cfg = PageTypeConfig(
+        type="article", template_path="/conf/t", content_root="/content/x",
+        dam_root="/content/dam/x", page_name_strategy="slug_from_url",
+        component_mappings={},
+        faq=FaqConfig(
+            cf_root="/content/dam/iffcotokio/content-fragments/faq",
+            cf_model="/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+        ),
+    )
+    path = tmp_path / "article.json"
+    save_page_type_config(cfg, path)
+
+    loaded = load_page_type_config(path)
+    assert type(loaded.faq) is FaqConfig
+    assert loaded.faq.cf_root == "/content/dam/iffcotokio/content-fragments/faq"
+    assert loaded.faq.cf_model == "/conf/iffcotokio/settings/dam/cfm/models/faq-template"
+    assert loaded == cfg
+
+
+def test_page_type_config_cache_round_trip_with_no_faq_key_loads_as_none(tmp_path):
+    """A cache file written by an older build has no `faq` key at all --
+    from_dict must still load it cleanly with faq defaulting to None."""
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({
+        "type": "article", "template_path": "/conf/t", "content_root": "/content/x",
+        "dam_root": "/content/dam/x", "page_name_strategy": "slug_from_url",
+        "component_mappings": {},
+    }), encoding="utf-8")
+
+    loaded = load_page_type_config(path)
+    assert loaded.faq is None

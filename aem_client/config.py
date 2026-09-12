@@ -197,7 +197,11 @@ def save_site_config(cfg: SiteConfig, path: Path) -> None:
 
 
 def load_page_type_config(path: Path) -> PageTypeConfig:
-    return PageTypeConfig(**_read_json(path))
+    # from_dict (not the bare constructor) so nested dataclass fields --
+    # currently just `faq` -- are rebuilt from the plain dict that asdict()
+    # flattened them to on save, instead of surviving the round trip as an
+    # untyped dict.
+    return PageTypeConfig.from_dict(_read_json(path))
 
 
 def save_page_type_config(cfg: PageTypeConfig, path: Path) -> None:
