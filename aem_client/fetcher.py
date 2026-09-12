@@ -96,12 +96,19 @@ def cf_exists(client: httpx.Client, base_url: str, cf_path: str,
     with AEM down, and a report that says "unknown" is honest where one that
     says "no" would be a guess.
     """
-    base = base_url.rstrip("/")
-    path = cf_path if cf_path.startswith("/") else f"/{cf_path}"
-    headers = {"authorization": auth_token} if auth_token else None
     try:
+        base = base_url.rstrip("/")
+        path = cf_path if cf_path.startswith("/") else f"/{cf_path}"
+        headers = {"authorization": auth_token} if auth_token else None
         response = client.get(f"{base}{path}.1.json", headers=headers, timeout=5.0)
-    except httpx.HTTPError:
+    except Exception:
+        # Deliberately broad: this is a best-effort yes/no/unknown probe, not
+        # a fetch whose failure should propagate. A malformed base_url
+        # (httpx.InvalidURL, UnicodeError from IDNA encoding), a bad cf_path
+        # (AttributeError on None), or any network failure (httpx.HTTPError)
+        # all mean the same thing to the caller: "could not check" -- and a
+        # probe must never be able to take down a package build that would
+        # otherwise succeed.
         return "unknown"
     if response.status_code == 200:
         return "yes"

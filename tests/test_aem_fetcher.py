@@ -288,3 +288,18 @@ def test_cf_exists_reports_unknown_on_unexpected_status():
         return httpx.Response(500)
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert cf_exists(client, "http://localhost:4502", "/content/dam/x/q") == "unknown"
+
+
+def test_cf_exists_reports_unknown_on_malformed_base_url():
+    """A fat-fingered aem_base_url (e.g. a non-numeric port) raises
+    httpx.InvalidURL during URL construction, before any transport is
+    touched -- no mock needed. Must degrade to "unknown", not crash."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    assert cf_exists(client, "http://localhost:abc", "/content/dam/x/q") == "unknown"
+
+
+def test_cf_exists_reports_unknown_on_none_cf_path():
+    """cf_path=None raises AttributeError on .startswith -- the contract is
+    unconditional "never raises", so this must also degrade to "unknown"."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    assert cf_exists(client, "http://localhost:4502", None) == "unknown"
