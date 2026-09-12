@@ -51,6 +51,9 @@ class PageTypeConfig:
     # the actual AEM page + parsys components.
     page_resource_type: str = ""
     container_resource_type: str = ""
+    # Origin of the live site, used to recognise which key lines in a doc
+    # carry THIS page's URL. Empty means "accept any absolute URL".
+    site_origin: str = ""
     # Where each NCM component slots into the template tree. Path is
     # relative to jcr:content (e.g. "root/responsivegrid/right_par/page_description").
     # When template_initial_content is present, the mapper walks this
@@ -78,6 +81,7 @@ class PageTypeConfig:
         "componentMappings": "component_mappings",
         "pageResourceType": "page_resource_type",
         "containerResourceType": "container_resource_type",
+        "siteOrigin": "site_origin",
         "componentSlots": "component_slots",
         "templateInitialContent": "template_initial_content",
         "enableSubBaseImageSorting": "enable_sub_base_image_sorting",

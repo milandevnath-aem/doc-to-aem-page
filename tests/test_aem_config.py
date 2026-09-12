@@ -229,6 +229,20 @@ def test_page_and_container_resource_types_from_cf():
     assert cfg.container_resource_type == "iffcotokio/components/parsys"
 
 
+def test_site_origin_defaults_empty_and_normalizes_from_camel_case():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_meta_title",
+        "componentMappings": {},
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.site_origin == ""
+
+    raw["siteOrigin"] = "https://www.iffcotokio.co.in"
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.site_origin == "https://www.iffcotokio.co.in"
+
+
 def test_component_mapping_dict_missing_resource_type_raises():
     raw = {
         "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",

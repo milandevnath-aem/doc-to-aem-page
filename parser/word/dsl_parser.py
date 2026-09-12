@@ -51,17 +51,27 @@ IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|svg|gif|webp)$", re.I)
 # no `[metadata]` marker/table in sight. Recognize the same keys the v3
 # parser handles so bannerTitle / jcr:title / seoDescription have values
 # to source from in this hybrid.
-_V3_STYLE_META_RE = re.compile(
-    r"^(Old URL|New Required URL|Meta Title|Meta Description|Meta keywords)\s*:\s*(.*)$",
-    re.I,
-)
-_V3_STYLE_META_KEY_MAP = {
-    "old url": "old_url",
-    "new required url": "url",
-    "meta title": "title",
-    "meta description": "description",
-    "meta keywords": "keywords",
-}
+#
+# Real client docs spell the URL key at least four ways ("New Required URL:",
+# "New Required URL :", "URL Need to be Careated:"). Matching a fixed list of
+# labels loses a doc every time an author invents a new spelling, so capture
+# is driven by the VALUE's shape: the label only has to contain "url", and the
+# value has to be an absolute URL on the configured site origin.
+_ANY_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 _-]{0,60})\s*:\s*(.*)$")
+_META_TITLE_RE = re.compile(r"^meta\s+title$", re.I)
+_META_DESC_RE = re.compile(r"^meta\s+description$", re.I)
+
+
+def _is_site_url(value: str, origin: str | None) -> bool:
+    """True when `value` is an absolute http(s) URL and -- when an origin is
+    configured -- sits under it. Without an origin any absolute URL passes, so
+    the CLI keeps working with no config."""
+    low = value.strip().lower()
+    if not low.startswith(("http://", "https://")):
+        return False
+    if not origin:
+        return True
+    return low.startswith(origin.rstrip("/").lower() + "/")
 
 # ponytail: component-specific asset marker for new-hero-banner. The line
 # `Banner Image: <file>` inside a `[component:new-hero-banner]` block names
@@ -192,7 +202,7 @@ def _blocks_to_html(blocks: list[dict]) -> str:
 
 
 class _DslParser:
-    def __init__(self, assets_dir: str | None = None):
+    def __init__(self, assets_dir: str | None = None, site_origin: str | None = None):
         self.page_properties: dict[str, str] = {}
         self.blocks: list[dict] = []
         self._in_metadata = False
@@ -202,6 +212,7 @@ class _DslParser:
         self._current_idx = -1  # body-element index of the line being processed; used by validators/word_structure.py
         self._assets_dir = Path(assets_dir) if assets_dir else None
         self._image_count = 0
+        self._site_origin = site_origin
 
     def _target_fields(self) -> dict:
         return self._item["fields"] if self._item is not None else self._component["fields"]
@@ -481,21 +492,31 @@ class _DslParser:
         self._active_field = "description"
 
     def _try_capture_v3_style_meta(self, line: str) -> bool:
-        """Capture v3-style inline meta keys as page.properties whenever
-        the walker is NOT inside a component (real client hybrid docs
-        put these at the top of the file with no `[metadata]` table).
-        Returns True to short-circuit further per-line handling."""
+        """Capture inline meta keys as page.properties whenever the walker is
+        NOT inside a component. Returns True to short-circuit further
+        per-line handling. First-wins, so a repeated key cannot stomp the
+        value the author wrote first."""
         if self._component is not None:
             return False
-        m = _V3_STYLE_META_RE.match(line)
+        m = _ANY_KEY_RE.match(line)
         if not m:
             return False
-        normalized = _V3_STYLE_META_KEY_MAP.get(m.group(1).lower())
-        if not normalized:
+        label, value = m.group(1).strip(), m.group(2).strip()
+        low = label.lower()
+        if "url" in low:
+            if not _is_site_url(value, self._site_origin):
+                return False
+            key = "old_url" if "old" in low else "url"
+        elif "keyword" in low:
+            key = "keywords"
+        elif _META_TITLE_RE.match(label):
+            key = "title"
+        elif _META_DESC_RE.match(label):
+            key = "description"
+        else:
             return False
-        # first-wins so a second occurrence of the same key can't stomp
-        # what the operator wrote first
-        self.page_properties.setdefault(normalized, m.group(2).strip())
+        if value:
+            self.page_properties.setdefault(key, value)
         return True
 
     def _finalize_rte(self, fields: dict):
@@ -544,13 +565,17 @@ def walk_document(document: Document, parser: "_DslParser") -> "_DslParser":
     return parser
 
 
-def parse_docx(path: str, assets_dir: str | None = None, format: str | None = None) -> dict:
+def parse_docx(path: str, assets_dir: str | None = None, format: str | None = None,
+               site_origin: str | None = None) -> dict:
     """Parse a .docx into NCM JSON.
 
     `format` controls which parser handles the doc. Omit for auto-detection:
     documents that use `[metadata]` / `[component:]` markers take the strict /
     lenient path (`v1v2`), and markerless article documents (bold H1 +
     `Meta Title:` key lines) take the `v3` path.
+
+    `site_origin` scopes which "...url..." key lines are captured as THIS
+    page's url/old_url -- see `_is_site_url`.
     """
     from parser.word.format_detect import detect_format
     from parser.word.v3_parser import _V3Parser
@@ -560,7 +585,7 @@ def parse_docx(path: str, assets_dir: str | None = None, format: str | None = No
     if fmt == "v3":
         parser = walk_document(document, _V3Parser(assets_dir))
     else:
-        parser = walk_document(document, _DslParser(assets_dir))
+        parser = walk_document(document, _DslParser(assets_dir, site_origin))
     return parser.to_dict(str(Path(path)), fmt)
 
 

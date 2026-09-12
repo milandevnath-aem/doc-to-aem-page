@@ -48,7 +48,10 @@ def run_pipeline(
     ncm = None
     aem_tree = None
     if not has_errors or force:
-        ncm = parse_docx(docx_path, assets_dir=assets_dir, format=format)
+        ncm = parse_docx(
+            docx_path, assets_dir=assets_dir, format=format,
+            site_origin=(page_type_config.site_origin if page_type_config else None),
+        )
         if page_type_config is not None:
             aem_tree = map_ncm_to_node_tree(
                 ncm, page_type_config, page_assets=page_assets,

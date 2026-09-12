@@ -665,3 +665,51 @@ def test_new_hero_banner_closed_on_first_heading_after_its_prose(tmp_path):
     assert "Cashless Treatment" in body_html
     assert "Body copy under the H2." in body_html
     assert "Another body paragraph" in body_html
+
+
+def test_url_captured_from_any_label_containing_url(tmp_path):
+    """Real client docs spell the URL key four different ways. Capture is
+    driven by the value's shape, not a fixed list of labels."""
+    def build(doc):
+        doc.add_paragraph("URL Need to be Careated:https://www.iffcotokio.co.in/health-insurance/why-family")
+        doc.add_paragraph("Meta Title: Why Family Health Insurance")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("Keywords:   family health insurance, tax")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Banner Image: hero.jpg")
+        doc.add_paragraph("Some banner prose.")
+
+    path = _build_docx(tmp_path / "a4.docx", build)
+    props = parse_docx(path, site_origin="https://www.iffcotokio.co.in")["page"]["properties"]
+    assert props["url"] == "https://www.iffcotokio.co.in/health-insurance/why-family"
+    assert props["keywords"] == "family health insurance, tax"
+    assert props["title"] == "Why Family Health Insurance"
+
+
+def test_old_url_label_routes_to_old_url_not_url(tmp_path):
+    def build(doc):
+        doc.add_paragraph("Old URL: https://www.iffcotokio.co.in/old/page")
+        doc.add_paragraph("New Required URL : https://www.iffcotokio.co.in/new/page")
+        doc.add_paragraph("Meta Title: T")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Prose.")
+
+    path = _build_docx(tmp_path / "urls.docx", build)
+    props = parse_docx(path, site_origin="https://www.iffcotokio.co.in")["page"]["properties"]
+    assert props["old_url"] == "https://www.iffcotokio.co.in/old/page"
+    assert props["url"] == "https://www.iffcotokio.co.in/new/page"
+
+
+def test_url_label_with_off_origin_value_is_not_captured(tmp_path):
+    """A URL on another domain is prose, not this page's URL."""
+    def build(doc):
+        doc.add_paragraph("Reference URL: https://example.com/somewhere")
+        doc.add_paragraph("Meta Title: T")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Prose.")
+
+    path = _build_docx(tmp_path / "off.docx", build)
+    props = parse_docx(path, site_origin="https://www.iffcotokio.co.in")["page"]["properties"]
+    assert "url" not in props
