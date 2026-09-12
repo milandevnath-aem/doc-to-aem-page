@@ -57,6 +57,20 @@ def _article_config() -> PageTypeConfig:
     )
 
 
+ORIGIN = "https://www.iffcotokio.co.in"
+
+
+def _url_config(**over) -> PageTypeConfig:
+    """An article config that derives page paths from the doc's own URL."""
+    cfg = _article_config()
+    cfg.page_name_strategy = "slug_from_url"
+    cfg.content_root = "/content/iffcotokio/en"
+    cfg.site_origin = ORIGIN
+    for key, value in over.items():
+        setattr(cfg, key, value)
+    return cfg
+
+
 def _ncm(page_props: dict | None = None, blocks: list | None = None,
          format_name: str = "v3") -> dict:
     return {
@@ -244,12 +258,40 @@ def test_map_featurecards_item_embedded_image_uses_same_dam_convention():
 def test_page_name_strategy_slug_from_url_uses_last_segment():
     cfg = _article_config()
     cfg.page_name_strategy = "slug_from_url"
+    cfg.site_origin = ORIGIN
     ncm = _ncm(page_props={
         "title": "Some Title",
-        "url": "/health-insurance/cashless-vs-reimbursement",
+        "url": f"{ORIGIN}/health-insurance/cashless-vs-reimbursement",
     })
     tree = map_ncm_to_node_tree(ncm, cfg)
     assert tree["name"] == "cashless-vs-reimbursement"
+
+
+def test_page_path_includes_url_hierarchy():
+    ncm = _ncm(page_props={"title": "T", "url": f"{ORIGIN}/health-insurance/"
+                                                f"family-health-insurance/who-should-buy"})
+    tree = map_ncm_to_node_tree(ncm, _url_config())
+    assert tree["path"] == ("/content/iffcotokio/en/health-insurance/"
+                            "family-health-insurance/who-should-buy")
+    assert tree["name"] == "who-should-buy"
+
+
+def test_page_path_single_segment_hierarchy():
+    ncm = _ncm(page_props={"title": "T",
+                           "url": f"{ORIGIN}/health-insurance/cashless-vs-reimbursement"})
+    tree = map_ncm_to_node_tree(ncm, _url_config())
+    assert tree["path"] == ("/content/iffcotokio/en/health-insurance/"
+                            "cashless-vs-reimbursement")
+
+
+def test_page_name_unresolvable_without_url_under_slug_from_url():
+    """No URL means no derivable location. The page must land on the
+    UNRESOLVED_SLUG sentinel so batch mode skips it instead of inventing a
+    path under the content root."""
+    from mapping.slug import UNRESOLVED_SLUG
+    ncm = _ncm(page_props={"title": "T", "url": ""})
+    tree = map_ncm_to_node_tree(ncm, _url_config())
+    assert tree["name"] == UNRESOLVED_SLUG
 
 
 def test_page_name_strategy_docx_filename_uses_source_stem():

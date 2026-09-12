@@ -1,7 +1,8 @@
 {
   "type": "article",
   "templatePath": "/conf/iffcotokio/settings/wcm/templates/article",
-  "contentRoot": "/content/iffcotokio/en/articles",
+  "contentRoot": "/content/iffcotokio/en",
+  "siteOrigin": "https://www.iffcotokio.co.in",
   "damRoot": "/content/dam/iffcotokio/articles",
   "pageResourceType": "iffcotokio/components/page",
   "containerResourceType": "iffcotokio/components/parsys",

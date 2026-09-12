@@ -555,7 +555,7 @@ def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, 
     text = page.text
     assert "AEM Node Tree" in text
     # target JCR path = content_root/<slug from meta title>, from the bundled sample
-    assert "/content/iffcotokio/en/articles/cashless-vs-reimbursement-guide" in text
+    assert "/content/iffcotokio/en/cashless-vs-reimbursement-guide" in text
     # jcr:content properties visible in the JSON dump
     assert "iffcotokio/components/text" in text  # page-description mapped
     assert "cq:template" in text
@@ -624,8 +624,13 @@ def test_history_page_lists_past_runs():
 def test_run_batch_route_uploads_multiple_docx_and_redirects(tmp_path, monkeypatch):
     """Client picks a folder with 2 subfolders, each holding one docx.
     Server receives files with webkitRelativePath filenames, groups them
-    into one batch run, and redirects to /batch-runs/{id}."""
+    into one batch run, and redirects to /batch-runs/{id}.
+    Cache dir is isolated so real fetched values on the dev box do not
+    make this brittle -- the pipeline falls back to the bundled sample."""
     monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
 
     import docx as docx_lib
     def make_v3(title):
@@ -674,8 +679,13 @@ def test_run_batch_route_rejects_when_no_docx(tmp_path, monkeypatch):
 
 def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
     """End-to-end: POST 2 docx -> download /batch-runs/{id}/package.zip ->
-    unzip -> both pages present + multi-root filter.xml."""
+    unzip -> both pages present + multi-root filter.xml.
+    Cache dir is isolated so real fetched values on the dev box do not
+    make this brittle -- the pipeline falls back to the bundled sample."""
     monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
 
     import docx as docx_lib
     def make_v3(title):

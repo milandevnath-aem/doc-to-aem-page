@@ -27,6 +27,7 @@ from pathlib import Path
 
 from aem_client.config import PageTypeConfig
 from mapping.slug import slugify
+from mapping.url_paths import page_path as _build_page_path, split_site_url
 
 # NCM page.properties key -> jcr:content property name.
 # Kept small on purpose. Extend via PageTypeConfig when per-template
@@ -56,8 +57,7 @@ def map_ncm_to_node_tree(
     cfg: PageTypeConfig,
     page_assets: dict[str, bytes] | None = None,
 ) -> dict:
-    page_name = _pick_page_name(ncm, cfg)
-    page_path = f"{cfg.content_root.rstrip('/')}/{page_name}"
+    page_name, page_jcr_path = _resolve_page_location(ncm, cfg)
     # Sync page-level meta into block fields BEFORE resolving assets or
     # walking blocks. Currently only new-hero-banner needs this (its
     # `title` field feeds bannerTitle, and the doc has no per-block
@@ -73,7 +73,7 @@ def map_ncm_to_node_tree(
         jcr_content = _build_jcr_content(ncm, cfg)
     tree = {
         "name": page_name,
-        "path": page_path,
+        "path": page_jcr_path,
         "primary_type": "cq:Page",
         "properties": {},
         "children": [jcr_content],
@@ -153,16 +153,27 @@ def _resolve_page_assets(
     return descriptors
 
 
-def _pick_page_name(ncm: dict, cfg: PageTypeConfig) -> str:
+def _resolve_page_location(ncm: dict, cfg: PageTypeConfig) -> tuple[str, str]:
+    """Return (node_name, absolute_jcr_path).
+
+    Under `slug_from_url` the URL's own path segments ARE the site hierarchy,
+    so the page lands at content_root + hierarchy + slug. Every other strategy
+    keeps the flat layout: one name directly under content_root.
+    """
     props = ncm["page"]["properties"]
-    strategy = cfg.page_name_strategy
-    if strategy == "slug_from_url":
-        segment = (props.get("url") or "").rstrip("/").rsplit("/", 1)[-1]
-        return slugify(segment) if segment else slugify(props.get("title", ""))
-    if strategy == "docx_filename":
-        return slugify(Path(ncm["source"]["path"]).stem)
-    # slug_from_meta_title (default)
-    return slugify(props.get("title", ""))
+    if cfg.page_name_strategy == "slug_from_url":
+        hierarchy, slug = split_site_url(props.get("url") or "", cfg.site_origin)
+        if slug:
+            return slug, _build_page_path(cfg.content_root, hierarchy, slug)
+        # No usable URL -- fall through to the sentinel so batch mode skips
+        # the page rather than inventing a location for it.
+        name = slugify("")
+        return name, _build_page_path(cfg.content_root, [], name)
+    if cfg.page_name_strategy == "docx_filename":
+        name = slugify(Path(ncm["source"]["path"]).stem)
+    else:
+        name = slugify(props.get("title", ""))
+    return name, _build_page_path(cfg.content_root, [], name)
 
 
 def _build_jcr_content(ncm: dict, cfg: PageTypeConfig) -> dict:
