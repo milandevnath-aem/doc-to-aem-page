@@ -27,7 +27,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["connectors*", "parser*", "models*", "mapping*", "validators*", "transformers*", "aem*", "config*", "utils*"]
+# `aem*` also globs `aem_client`. `ui*` needs its own entry -- nothing else
+# matches it, and omitting it ships a wheel with no operator UI.
+include = ["connectors*", "parser*", "models*", "mapping*", "validators*", "aem*", "config*", "ui*"]
+
+[tool.setuptools.package-data]
+# Runtime data, not just build niceties: StaticFiles raises at import when
+# its directory is absent, Jinja2Templates has nothing to render without the
+# templates, and `load_page_type_from_sample` reads config/samples at runtime.
+# Generated/operator-local dirs (ui/static/assets, ui/uploads, config/cache)
+# are gitignored and deliberately excluded.
+ui = ["templates/*.html", "static/*.css"]
+config = ["samples/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

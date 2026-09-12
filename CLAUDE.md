@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-AEM Content Automation Framework — Python framework that ingests structured content (Phase 1: Microsoft Word `.docx`) and generates AEM pages from it. Folder hierarchy of the source maps to AEM page hierarchy; document filename becomes the page name (slugified).
+AEM Content Automation Framework — Python framework that ingests structured content (Phase 1: Microsoft Word `.docx`) and emits installable AEM Content Packages. No AEM SDK and no custom AEM server code: output is a FileVault `.zip` an operator installs through Package Manager.
 
-Example: `Products/Insurance/Health/Family Plan.docx` → `/content/site/products/insurance/health/family-plan`
+Page paths do NOT mirror the source folder tree. The page name comes from the active `pageNameStrategy` (`slug_from_meta_title` | `slug_from_url` | `docx_filename`) and lands directly under the configured `contentRoot`. In batch mode a subfolder groups a `.docx` with its images and never appears in the JCR path.
 
-Status: project skeleton only — package directories and `__init__.py` stubs exist, no implementation yet.
+Example (`slug_from_meta_title`, `contentRoot` `/content/iffcotokio/en/articles`):
+`Articles/Article1/V2-Cashless Treatment vs Reimbursement Claims.docx`
+→ `/content/iffcotokio/en/articles/cashless-treatment-vs-reimbursement-claims`
 
 ## Commands
 
@@ -32,21 +34,28 @@ python -m venv .venv
 
 ## Architecture
 
-The framework follows a pipeline: discover → parse → normalize → validate → map → generate/publish. Each stage is a separate package so parsing logic stays decoupled from AEM-specific output.
+    .docx → format_detect → validators → parser → NCM dict → mapping/mapper → node tree → aem/package_generator → .zip
 
-- `connectors/` — source-specific readers (`word/`, `google_drive/`, `google_docs/`, `google_sheets/`). Phase 1 implements `word/` only; others are placeholders for future phases. A connector's job ends at producing raw parsed content — it must not know about AEM components.
-- `parser/` — turns raw connector output into structured content.
-- `models/` — the normalized, source-agnostic intermediate content model (JSON-serializable). This is the contract every connector must produce and every mapper/generator consumes — it is the integration point between source format and AEM output.
-- `validators/` — validate parsed content against the content contract before mapping/publishing.
-- `mapping/` — configuration-driven content-section → AEM-component mapping (e.g. Heading 1 → Title Component, Paragraph → Text Component). Mapping rules must live in config, not hardcoded in code.
-- `transformers/` — apply mapping rules to convert the normalized model into AEM page/component structures.
-- `aem/package_generator/` — Mode 1 (local dev): emits AEM Content Packages for a local Author instance.
-- `aem/author_api/` — Mode 2 (future): creates/updates pages directly via AEM Author APIs. The publishing layer is abstracted so switching between package generation and direct API requires minimal change — code against this boundary, not against either implementation directly.
-- `assets/` — asset handling/upload for images and other binaries referenced by content.
-- `config/` — mapping rules, connector config, environment config.
-- `utils/` — shared helpers (logging, slug generation, etc).
+- `parser/word/` — the engine. `dsl_parser.py` handles the v1/v2 bracket-marker DSL and opens the `.docx` itself via python-docx; `v3_parser.py` handles the markerless article format; `format_detect.py` picks between them. Both emit the NCM dict.
+- `validators/` — pre-flight structure checks. `word_structure.py` subclasses the real parser so validation can never drift from what the parser actually accepts.
+- `mapping/` — NCM + `PageTypeConfig` → abstract AEM node tree (`mapper.py`), plus the JCR slug helper (`slug.py`) and the Sling-JSON → node-tree converter (`template_convert.py`). This is the seam between source-agnostic NCM and AEM-specific output.
+- `aem_client/` — the AEM-side config half. `config.py` holds `SiteConfig` / `PageTypeConfig` and their on-disk cache; `fetcher.py` pulls `PageTypeConfig` from an AEM Content Fragment plus the template's initial content.
+- `aem/package_generator/` — Mode 1. Node tree → FileVault `.content.xml` (`filevault.py`) → installable `.zip` (`package.py`), single-page and batch, byte-deterministic.
+- `aem/author_api/` — Mode 2, not started. Create/update pages directly via AEM Author APIs.
+- `ui/` — FastAPI operator UI. `app.py` is the only file that knows HTTP; `service.py` is the web-framework-free glue; `batch_service.py` runs folder batches; `runs.py` is SQLite run history.
+- `config/` — `samples/` (bundled `PageTypeConfig`) and `cache/` (fetched configs). JSON only, no Python.
+- `connectors/`, `models/` — scaffold only, still empty. See Known gaps.
 
-Design constraints to preserve when implementing:
-- Connectors are source-agnostic at the boundary — they all produce the same `models/` content model, regardless of source format.
-- Component mapping is config-driven, not hardcoded per content type.
-- Publishing (package generation vs. Author API) is abstracted behind a common interface so deployment mode is swappable.
+Design constraints to preserve:
+
+- Component mapping is config-driven. Rules live in the AEM Content Fragment (`PageTypeConfig.component_mappings`), never hardcoded per content type.
+- Publishing is abstracted behind the node tree. Whatever installs pages — FileVault package today, Sling POST later — consumes the same plain dict, so `mapping/mapper.py` never learns the destination mechanism.
+- `ui/service.py` keeps zero web-framework imports, so the UI can become a JSON API without touching pipeline logic.
+- An NCM block the config has no mapping for must stay visible: the mapper marks it `__mapping_gap` rather than letting the content vanish at install time.
+
+## Known gaps
+
+- `models/` is empty. The NCM is an untyped dict, hand-built independently by both parsers and read by the mapper through `.get()` chains. `pydantic` is a declared dependency and entirely unused. Renaming a key such as `htmltext` fails silently instead of loudly.
+- `connectors/` is empty. `dsl_parser.py` opens the `.docx` directly, so the source-agnostic connector boundary described in Phase 1 does not exist yet — adding a second source means extracting it first.
+- No logging anywhere in the codebase. Batch failures surface only as `BatchEntry.error` strings in the UI table.
+- `ALLOWED_KEYS` (`parser/word/dsl_parser.py`) and `KNOWN_COMPONENTS` (`validators/word_structure.py`) are hardcoded, duplicating `component_mappings` from the CF.
