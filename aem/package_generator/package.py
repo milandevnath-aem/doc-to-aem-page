@@ -46,31 +46,18 @@ class PackageMeta:
 
 
 def build_package(tree: dict, meta: PackageMeta) -> bytes:
-    """Return the zip contents for a single-page FileVault package."""
-    entries = _entries_for(tree, meta)
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(entries):
-            info = zipfile.ZipInfo(path, date_time=_FIXED_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            zf.writestr(info, entries[path])
-    return buf.getvalue()
+    """Return the zip contents for a single-page FileVault package.
 
-
-def _entries_for(tree: dict, meta: PackageMeta) -> dict[str, str]:
-    page_path = tree["path"]
-    content_xml = node_to_content_xml(tree)
-    return {
-        "META-INF/vault/filter.xml": _filter_xml(page_path),
-        "META-INF/vault/properties.xml": _properties_xml(meta),
-        f"jcr_root{page_path}/.content.xml": content_xml,
-    }
-
-
-def _filter_xml(page_path: str) -> str:
-    """Scope the package to this page path so an install doesn't clobber
-    sibling pages under the same content root."""
-    return _multi_filter_xml([page_path])
+    Delegates to `build_batch_package` with a one-tree list. Verified
+    byte-identical to this function's old standalone implementation for
+    a tree with no `_assets`/`_faq_cfs` -- both already built the same
+    `properties.xml` and the same filter.xml shape (a single-root
+    `workspaceFilter` is exactly what `_multi_filter_xml` emits for a
+    one-element list). Delegating also means a single-page run now
+    bundles `_assets` and `_faq_cfs` the same way batch does, which this
+    function never did on its own.
+    """
+    return build_batch_package([tree], meta)
 
 
 def _multi_filter_xml(page_paths: list[str]) -> str:

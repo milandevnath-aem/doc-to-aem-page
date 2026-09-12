@@ -339,3 +339,40 @@ def test_batch_package_is_byte_identical_across_builds_with_cfs():
             "_faq_cfs": [_cf_tree("/content/dam/x/faq/a/q", "q")]}
     meta = PackageMeta(name="b")
     assert build_batch_package([tree], meta) == build_batch_package([tree], meta)
+
+
+# ---- Follow-up: single-page build_package must bundle CFs too ----
+
+def test_single_page_build_package_writes_cf_content_xml_folders_and_filter_root():
+    """`download_package` (the single-doc route) must not silently drop
+    FAQ CFs the mapper attached to the tree -- `build_package` now
+    delegates to `build_batch_package`, so it gets the same treatment."""
+    tree = {"name": "p", "path": "/content/iffcotokio/en/p", "primary_type": "cq:Page",
+            "properties": {}, "children": [],
+            "_faq_cf_root": "/content/dam/x/faq",
+            "_faq_cfs": [_cf_tree(
+                "/content/dam/x/faq/health-insurance/q-one", "q-one")]}
+    data = build_package(tree, PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        names = zf.namelist()
+        assert "jcr_root/content/dam/x/faq/health-insurance/q-one/.content.xml" in names
+        cf_xml = zf.read(
+            "jcr_root/content/dam/x/faq/health-insurance/q-one/.content.xml").decode()
+        assert 'jcr:primaryType="dam:Asset"' in cf_xml
+        assert 'contentFragment="{Boolean}true"' in cf_xml
+        folder_xml = zf.read(
+            "jcr_root/content/dam/x/faq/health-insurance/.content.xml").decode()
+        assert 'jcr:primaryType="sling:Folder"' in folder_xml
+        filters = zf.read("META-INF/vault/filter.xml").decode()
+        assert '<filter root="/content/dam/x/faq/health-insurance/q-one"/>' in filters
+        page_xml = zf.read("jcr_root/content/iffcotokio/en/p/.content.xml").decode()
+        assert "_faq_cfs" not in page_xml
+
+
+def test_single_page_build_package_is_byte_identical_across_builds_with_cfs():
+    tree = {"name": "p", "path": "/content/iffcotokio/en/p", "primary_type": "cq:Page",
+            "properties": {}, "children": [],
+            "_faq_cf_root": "/content/dam/x/faq",
+            "_faq_cfs": [_cf_tree("/content/dam/x/faq/a/q", "q")]}
+    meta = PackageMeta(name="b")
+    assert build_package(tree, meta) == build_package(tree, meta)
