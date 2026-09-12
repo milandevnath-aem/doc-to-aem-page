@@ -206,14 +206,28 @@ def _build_jcr_content(ncm: dict, cfg: PageTypeConfig, faq_cfs: list[dict]) -> d
     }
 
 
+def _faq_block_contributes_fragment(block: dict) -> bool:
+    """True when at least one item on this `faq` block would actually
+    produce a fragment (i.e. carries a non-blank `question`) -- mirrors
+    `build_faq_cf_trees`'s own skip-blank-question rule without reaching
+    into it, so the inline-removal decision matches what was actually
+    generated block-by-block rather than config-wide. A block with no
+    qualifying item must NOT be pulled off the page -- there is no
+    fragment to reference, so removing it would silently drop the prose."""
+    return any((item.get("fields", {}).get("question") or "").strip()
+               for item in block.get("items", []))
+
+
 def _build_root_container(ncm: dict, cfg: PageTypeConfig, faq_cfs: list[dict]) -> dict:
-    # `faq` blocks are represented by the reference node below, not inline --
-    # their prose already left the page as generated Content Fragments. Only
-    # applies when FAQ CF generation is actually configured; without it, a
-    # `faq` block is legacy inline content like any other component.
+    # `faq` blocks that actually produced a fragment are represented by the
+    # reference node below, not inline -- their prose already left the page
+    # as generated Content Fragments. Only applies when FAQ CF generation is
+    # configured AND the block contributed a fragment; otherwise a `faq`
+    # block is legacy inline content like any other component.
     blocks = ncm.get("blocks", [])
     if cfg.faq is not None:
-        blocks = [b for b in blocks if b["name"] != "faq"]
+        blocks = [b for b in blocks
+                  if not (b["name"] == "faq" and _faq_block_contributes_fragment(b))]
     children = [_build_component(block, i, cfg) for i, block in enumerate(blocks)]
     ref = _build_faq_reference(faq_cfs, cfg, len(children))
     if ref is not None:
@@ -387,9 +401,12 @@ def _build_jcr_content_from_template(
 
     for block in ncm.get("blocks", []):
         source_name = block["name"]
-        if source_name == "faq" and cfg.faq is not None:
+        if (source_name == "faq" and cfg.faq is not None
+                and _faq_block_contributes_fragment(block)):
             # represented by the reference node appended below, not placed
-            # into a slot -- its prose already left the page as CFs.
+            # into a slot -- its prose already left the page as CFs. A faq
+            # block that contributed no fragment falls through to normal
+            # slot placement so its content isn't silently dropped.
             continue
         slot_path = slots.get(source_name)
         if slot_path:

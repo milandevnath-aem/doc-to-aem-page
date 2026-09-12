@@ -899,3 +899,54 @@ def test_template_overlay_faq_block_becomes_cf_trees_and_a_page_reference():
     assert faq_nodes[0]["properties"]["fragmentPaths"] == [c["path"] for c in cfs]
     for node in right_par["children"]:
         assert "Yes, parents can be included" not in str(node["properties"])
+
+
+def test_faq_block_with_no_question_falls_back_to_inline_rendering():
+    """`build_faq_cf_trees` skips items with a blank/missing `question`, so a
+    faq block whose items are ALL like that contributes no fragment. The
+    inline-removal filter must key on that per-block, not just on `cfg.faq`
+    being set -- otherwise the prose is pulled off the page for a fragment
+    that was never generated, and vanishes with no trace."""
+    cfg = _config_with_faq()
+    ncm = _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys")
+    ncm["blocks"][1]["items"] = [
+        {"id": None, "implicit": True,
+         "fields": {"question": "", "htmltext": "<p>Orphan answer.</p>"}},
+    ]
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    assert "_faq_cfs" not in tree  # nothing qualified for a fragment
+
+    root = tree["children"][0]["children"][0]
+    faq_nodes = [c for c in root["children"] if c["name"].startswith("faq")]
+    assert len(faq_nodes) == 1
+    # legacy inline rendering: resourceType from component_mappings, not the
+    # page_component's reference shape, and no fragmentPaths were emitted
+    assert faq_nodes[0]["properties"]["sling:resourceType"] == "iffcotokio/components/faq"
+    assert "fragmentPaths" not in faq_nodes[0]["properties"]
+    # the answer prose is still reachable on the page tree
+    assert faq_nodes[0]["children"][0]["properties"]["text"] == "<p>Orphan answer.</p>"
+
+
+def test_template_overlay_faq_block_with_no_question_falls_back_to_inline_rendering():
+    """Same rule in template-overlay mode: a faq block that contributes no
+    fragment must not be silently dropped -- it falls through to normal
+    slot placement (here, no slot for `faq` -> fallback parent) instead of
+    being skipped as if a reference node would replace it."""
+    cfg = _config_with_faq()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    ncm = _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys")
+    ncm["blocks"][1]["items"] = [
+        {"id": None, "implicit": True,
+         "fields": {"question": "", "htmltext": "<p>Orphan answer.</p>"}},
+    ]
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    assert "_faq_cfs" not in tree
+
+    right_par = tree["children"][0]["children"][0]["children"][1]["children"][1]
+    faq_nodes = [c for c in right_par["children"] if c["name"].startswith("faq")]
+    assert len(faq_nodes) == 1
+    assert "fragmentPaths" not in faq_nodes[0]["properties"]
+    assert faq_nodes[0]["children"][0]["properties"]["text"] == "<p>Orphan answer.</p>"
