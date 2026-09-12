@@ -73,11 +73,28 @@ def _faq_rows(result) -> list[dict]:
     return rows
 
 
+_DANGEROUS_PREFIXES = ("=", "+", "-", "@")
+
+
+def _neutralize_formula(value):
+    """Prefix a leading apostrophe onto any string cell that Excel would
+    otherwise evaluate as a formula (=, +, -, @). These CSVs are filed and
+    handed to other people, opened in Excel -- a question/answer/error/etc.
+    sourced from an author-controlled Word doc is a real trust boundary,
+    not just a CSV-quoting concern. Non-strings (the int columns) pass
+    through untouched so they keep rendering as plain numbers.
+    """
+    if isinstance(value, str) and value.startswith(_DANGEROUS_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _to_csv(columns: list[str], rows: list[dict]) -> str:
     buf = io.StringIO(newline="")
     writer = csv.DictWriter(buf, fieldnames=columns, lineterminator="\r\n")
     writer.writeheader()
-    writer.writerows(rows)
+    for row in rows:
+        writer.writerow({k: _neutralize_formula(v) for k, v in row.items()})
     return buf.getvalue()
 
 

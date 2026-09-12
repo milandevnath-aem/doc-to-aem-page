@@ -69,3 +69,43 @@ def test_report_zip_contains_exactly_both_csvs():
     data = build_report_zip(BatchResult(filename_top="X", entries=[_entry()]))
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         assert sorted(zf.namelist()) == ["faqs.csv", "pages.csv"]
+
+
+def test_formula_prefixed_cells_are_neutralised_in_both_csvs():
+    """=, +, -, @ leading a string cell must come back apostrophe-prefixed
+    in every column -- not just question/answer -- so Excel renders it as
+    text instead of evaluating it as a formula. Numeric columns must be
+    unaffected."""
+    entry = _entry(
+        error="=cmd|'/c calc'!A1",
+        faq_cfs=[{"path": "+SUM(1,1)", "name": "q", "collision": "-yes",
+                  "children": [{"name": "jcr:content",
+                                "properties": {"jcr:title": "@HYPERLINK(x)"},
+                                "children": [{"name": "data", "children": [
+                                    {"name": "master", "properties": {
+                                        "answer": "=HYPERLINK(\"http://evil\",\"click\")",
+                                        "faqCategory": ["=1+1"],
+                                    }}]}]}]}],
+    )
+    result = BatchResult(filename_top="X", entries=[entry])
+    data = build_report_zip(result)
+
+    pages = _read(data, "pages.csv")
+    assert pages[0]["error"] == "'=cmd|'/c calc'!A1"
+    assert pages[0]["faq_count"] == "1"       # numeric column untouched
+
+    faqs = _read(data, "faqs.csv")
+    assert faqs[0]["cf_path"] == "'+SUM(1,1)"
+    assert faqs[0]["collision"] == "'-yes"
+    assert faqs[0]["question"] == "'@HYPERLINK(x)"
+    assert faqs[0]["faq_category"] == "'=1+1"
+    assert faqs[0]["answer_chars"] == str(len('=HYPERLINK("http://evil","click")'))
+
+
+def test_ordinary_values_pass_through_byte_identical():
+    """The guard must not touch content with no dangerous leading char."""
+    rows = _read(build_report_zip(BatchResult(filename_top="X", entries=[_entry()])),
+                 "faqs.csv")
+    assert rows[0]["question"] == "Q one?"
+    assert rows[0]["cf_path"] == "/content/dam/x/faq/health-insurance/family/q-one"
+    assert rows[0]["collision"] == "no"
