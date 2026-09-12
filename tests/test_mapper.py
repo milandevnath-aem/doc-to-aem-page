@@ -13,7 +13,7 @@ Whichever backend eventually installs the pages (FileVault package, custom
 servlet, direct Sling POST) consumes the same tree.
 """
 
-from aem_client.config import PageTypeConfig
+from aem_client.config import FaqConfig, PageTypeConfig
 from mapping.mapper import map_ncm_to_node_tree
 from mapping.slug import slugify
 
@@ -69,6 +69,39 @@ def _url_config(**over) -> PageTypeConfig:
     for key, value in over.items():
         setattr(cfg, key, value)
     return cfg
+
+
+def _config_with_faq(**faq_over) -> PageTypeConfig:
+    cfg = _url_config()
+    faq_kwargs = dict(
+        cf_root="/content/dam/iffcotokio/content-fragments/faq",
+        cf_model="/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+        tag_namespace="iffcotokio",
+        page_component={"resourceType": "iffcotokio/components/faq",
+                        "pathsProperty": "fragmentPaths"},
+    )
+    faq_kwargs.update(faq_over)
+    cfg.faq = FaqConfig(**faq_kwargs)
+    return cfg
+
+
+def _ncm_with_faq(url: str) -> dict:
+    return _ncm(
+        page_props={"title": "T", "url": url},
+        blocks=[
+            {"name": "page-description", "variant": None,
+             "fields": {"htmltext": "<p>Article body.</p>"}, "items": [], "table": None},
+            {"name": "faq", "variant": None, "fields": {"title": "FAQs"}, "table": None,
+             "items": [
+                 {"id": None, "implicit": True,
+                  "fields": {"question": "Can parents be included?",
+                             "htmltext": "<p>Yes, parents can be included.</p>"}},
+                 {"id": None, "implicit": True,
+                  "fields": {"question": "Is it mandatory?",
+                             "htmltext": "<p>No.</p>"}},
+             ]},
+        ],
+    )
 
 
 def _ncm(page_props: dict | None = None, blocks: list | None = None,
@@ -786,3 +819,83 @@ def test_map_hero_banner_title_from_meta_title():
     )
     hero = _hero_node(tree)
     assert hero["properties"]["bannerTitle"] == "Cashless Meta Title"
+
+
+# ---------- FAQ -> Content Fragments + page reference (Task 6) ----------
+
+def test_faq_block_becomes_cf_trees_and_a_page_reference():
+    cfg = _config_with_faq()
+    ncm = _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys")
+    tree = map_ncm_to_node_tree(ncm, cfg)
+
+    cfs = tree["_faq_cfs"]
+    assert [c["name"] for c in cfs] == ["can-parents-be-included", "is-it-mandatory"]
+
+    root = tree["children"][0]["children"][0]
+    faq_nodes = [c for c in root["children"]
+                 if c["properties"].get("sling:resourceType")
+                 == "iffcotokio/components/faq"]
+    assert len(faq_nodes) == 1
+    assert faq_nodes[0]["properties"]["fragmentPaths"] == [c["path"] for c in cfs]
+
+
+def test_faq_block_does_not_leave_rte_prose_on_the_page():
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), _config_with_faq())
+    root = tree["children"][0]["children"][0]
+    for node in root["children"]:
+        assert "Yes, parents can be included" not in str(node["properties"])
+
+
+def test_no_faq_page_component_configured_still_emits_cfs():
+    """Fragments are the deliverable; the page reference is optional until the
+    AEM team supplies the component."""
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"),
+        _config_with_faq(page_component={}))
+    assert len(tree["_faq_cfs"]) == 2
+    root = tree["children"][0]["children"][0]
+    assert all("fragmentPaths" not in c["properties"] for c in root["children"])
+
+
+def test_tree_carries_cf_root_and_source_url_for_downstream_consumers():
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), _config_with_faq())
+    assert tree["_faq_cf_root"] == "/content/dam/iffcotokio/content-fragments/faq"
+    assert tree["_source_url"] == f"{ORIGIN}/health-insurance/family/who-buys"
+
+
+def test_no_faq_block_means_no_faq_keys_on_the_tree():
+    tree = map_ncm_to_node_tree(_ncm(page_props={"title": "T", "url": ""}),
+                                _config_with_faq())
+    assert "_faq_cfs" not in tree
+    assert "_faq_cf_root" not in tree
+
+
+def test_template_overlay_faq_block_becomes_cf_trees_and_a_page_reference():
+    """Both mapper modes must behave alike: template-overlay mode also pulls
+    FAQ prose out of the tree and appends a reference node (to the fallback
+    parent, since `faq` is not in componentSlots here), instead of emitting
+    the fragment content twice."""
+    cfg = _config_with_faq()
+    cfg.template_initial_content = _tpl_initial()
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    ncm = _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys")
+    tree = map_ncm_to_node_tree(ncm, cfg)
+
+    cfs = tree["_faq_cfs"]
+    assert [c["name"] for c in cfs] == ["can-parents-be-included", "is-it-mandatory"]
+
+    right_par = tree["children"][0]["children"][0]["children"][1]["children"][1]
+    assert right_par["name"] == "right_par"
+    # the faq reference lands in the fallback parent (right_par, the parent
+    # of the only configured slot) -- not inlined as raw FAQ prose.
+    faq_nodes = [c for c in right_par["children"]
+                 if c["properties"].get("sling:resourceType")
+                 == "iffcotokio/components/faq"]
+    assert len(faq_nodes) == 1
+    assert faq_nodes[0]["properties"]["fragmentPaths"] == [c["path"] for c in cfs]
+    for node in right_par["children"]:
+        assert "Yes, parents can be included" not in str(node["properties"])

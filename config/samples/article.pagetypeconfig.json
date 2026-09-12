@@ -38,5 +38,10 @@
     "cardandrte": "iffcotokio/components/cardandrte",
     "cards-with-full-width": "iffcotokio/components/cardswithfullwidth",
     "teasercomponent": "iffcotokio/components/teaser"
+  },
+  "faq": {
+    "cfRoot": "/content/dam/iffcotokio/content-fragments/faq",
+    "cfModel": "/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+    "tagNamespace": "iffcotokio"
   }
 }

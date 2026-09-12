@@ -26,6 +26,7 @@ import copy
 from pathlib import Path
 
 from aem_client.config import PageTypeConfig
+from mapping.faq_cf import build_faq_cf_trees
 from mapping.slug import slugify
 from mapping.url_paths import page_path as _build_page_path, split_site_url
 
@@ -67,10 +68,13 @@ def map_ncm_to_node_tree(
     # `imageFile` markers get rewritten into `imagePath` on the NCM
     # itself; the rest of the pipeline stays oblivious to the lookup.
     resolved_assets = _resolve_page_assets(ncm, cfg, page_name, page_assets or {})
+    hierarchy, _ = split_site_url(
+        ncm["page"]["properties"].get("url") or "", cfg.site_origin)
+    faq_cfs = build_faq_cf_trees(ncm, cfg, hierarchy)
     if cfg.template_initial_content:
-        jcr_content = _build_jcr_content_from_template(ncm, cfg)
+        jcr_content = _build_jcr_content_from_template(ncm, cfg, faq_cfs)
     else:
-        jcr_content = _build_jcr_content(ncm, cfg)
+        jcr_content = _build_jcr_content(ncm, cfg, faq_cfs)
     tree = {
         "name": page_name,
         "path": page_jcr_path,
@@ -83,6 +87,14 @@ def map_ncm_to_node_tree(
         # kept on the page node so batch-mode iterates assets per-page
         # in the same shape it iterates the multi-root filter.
         tree["_assets"] = resolved_assets
+    if faq_cfs:
+        # Stripped by the packager before XML serialization, exactly like
+        # `_assets`. `_faq_cf_root` saves the packager from reverse-engineering
+        # where the hierarchy starts inside a fragment path; `_source_url`
+        # feeds the batch report's `url` column.
+        tree["_faq_cfs"] = faq_cfs
+        tree["_faq_cf_root"] = cfg.faq.cf_root
+        tree["_source_url"] = ncm["page"]["properties"].get("url") or ""
     return tree
 
 
@@ -176,7 +188,7 @@ def _resolve_page_location(ncm: dict, cfg: PageTypeConfig) -> tuple[str, str]:
     return name, _build_page_path(cfg.content_root, [], name)
 
 
-def _build_jcr_content(ncm: dict, cfg: PageTypeConfig) -> dict:
+def _build_jcr_content(ncm: dict, cfg: PageTypeConfig, faq_cfs: list[dict]) -> dict:
     props: dict = {
         "sling:resourceType": cfg.page_resource_type.strip(),
         "cq:template": cfg.template_path,
@@ -190,17 +202,49 @@ def _build_jcr_content(ncm: dict, cfg: PageTypeConfig) -> dict:
         "name": "jcr:content",
         "primary_type": "cq:PageContent",
         "properties": props,
-        "children": [_build_root_container(ncm, cfg)],
+        "children": [_build_root_container(ncm, cfg, faq_cfs)],
     }
 
 
-def _build_root_container(ncm: dict, cfg: PageTypeConfig) -> dict:
+def _build_root_container(ncm: dict, cfg: PageTypeConfig, faq_cfs: list[dict]) -> dict:
+    # `faq` blocks are represented by the reference node below, not inline --
+    # their prose already left the page as generated Content Fragments. Only
+    # applies when FAQ CF generation is actually configured; without it, a
+    # `faq` block is legacy inline content like any other component.
+    blocks = ncm.get("blocks", [])
+    if cfg.faq is not None:
+        blocks = [b for b in blocks if b["name"] != "faq"]
+    children = [_build_component(block, i, cfg) for i, block in enumerate(blocks)]
+    ref = _build_faq_reference(faq_cfs, cfg, len(children))
+    if ref is not None:
+        children.append(ref)
     return {
         "name": "root",
         "primary_type": "nt:unstructured",
         "properties": {"sling:resourceType": cfg.container_resource_type.strip()},
-        "children": [_build_component(block, i, cfg)
-                     for i, block in enumerate(ncm.get("blocks", []))],
+        "children": children,
+    }
+
+
+def _build_faq_reference(faq_cfs: list[dict], cfg: PageTypeConfig, index: int) -> dict | None:
+    """A node pointing the page at its generated fragments. Returns None when
+    there are no fragments, or when the AEM team has not yet supplied the
+    component -- the fragments are still generated either way."""
+    if not faq_cfs or cfg.faq is None:
+        return None
+    component = cfg.faq.page_component or {}
+    resource_type = (component.get("resourceType") or "").strip()
+    paths_property = (component.get("pathsProperty") or "").strip()
+    if not resource_type or not paths_property:
+        return None
+    return {
+        "name": f"faq_{index}",
+        "primary_type": "nt:unstructured",
+        "properties": {
+            "sling:resourceType": resource_type,
+            paths_property: [c["path"] for c in faq_cfs],
+        },
+        "children": [],
     }
 
 
@@ -323,7 +367,9 @@ def _image_to_file_reference(image: dict, cfg: PageTypeConfig) -> str:
 # the slot parent so nothing silently vanishes.
 
 
-def _build_jcr_content_from_template(ncm: dict, cfg: PageTypeConfig) -> dict:
+def _build_jcr_content_from_template(
+    ncm: dict, cfg: PageTypeConfig, faq_cfs: list[dict],
+) -> dict:
     # deep-copy the template so per-run overlays don't mutate the config
     jcr_content = copy.deepcopy(cfg.template_initial_content)
     # apply page-level properties (meta title, description, etc.) onto
@@ -341,6 +387,10 @@ def _build_jcr_content_from_template(ncm: dict, cfg: PageTypeConfig) -> dict:
 
     for block in ncm.get("blocks", []):
         source_name = block["name"]
+        if source_name == "faq" and cfg.faq is not None:
+            # represented by the reference node appended below, not placed
+            # into a slot -- its prose already left the page as CFs.
+            continue
         slot_path = slots.get(source_name)
         if slot_path:
             slot_parts = slot_path.split("/")
@@ -363,6 +413,12 @@ def _build_jcr_content_from_template(ncm: dict, cfg: PageTypeConfig) -> dict:
             node = _build_component(block, len(fallback_parent["children"]), cfg)
             node["properties"]["__mapping_gap"] = source_name
             fallback_parent["children"].append(node)
+
+    if faq_cfs and cfg.faq is not None:
+        fallback_parent = _pick_fallback_parent(jcr_content, slots)
+        ref = _build_faq_reference(faq_cfs, cfg, len(fallback_parent["children"]))
+        if ref is not None:
+            fallback_parent["children"].append(ref)
     return jcr_content
 
 
