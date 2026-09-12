@@ -228,13 +228,17 @@ def download_batch_package(run_id: str):
     for entry in record.entries:
         if entry.status != "passed" or entry.aem_tree is None:
             continue
-        # Re-attach the resolved assets to the tree so the packager
-        # sees them. `_assets` was pulled off at run time to keep the
-        # DB payload JSON-safe (bytes -> base64 in `assets`), and now
-        # goes back onto a shallow copy for this one build.
+        # Re-attach the resolved assets and FAQ CFs to the tree so the
+        # packager sees them. Both were popped off at run time -- `_assets`
+        # to keep the DB payload JSON-safe (bytes -> base64 in `assets`),
+        # `_faq_cfs` just to keep the same pattern -- and now go back onto
+        # a shallow copy for this one build. `_faq_cf_root` was left on the
+        # tree by batch_service, so it survives untouched on `entry.aem_tree`.
         tree = {**entry.aem_tree}
         if entry.assets:
             tree["_assets"] = entry.assets
+        if entry.faq_cfs:
+            tree["_faq_cfs"] = entry.faq_cfs
         trees.append(tree)
     if not trees:
         raise HTTPException(status_code=400,

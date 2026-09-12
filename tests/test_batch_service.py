@@ -340,3 +340,74 @@ def _dig_hero_imagepath(tree: dict) -> str:
     grid = next(c for c in root["children"] if c["name"] == "responsivegrid")
     hero = next(c for c in grid["children"] if c["name"] == "new_hero_banner")
     return hero["properties"].get("imagePath", "")
+
+
+# ---- Task 7: FAQ Content Fragments carried through batch entries ----
+
+def test_batch_pops_faq_cfs_but_leaves_cf_root_and_source_url_on_tree(tmp_path, monkeypatch):
+    """`_faq_cfs` is JSON-safe (Task 6) but still rides on `BatchEntry.faq_cfs`,
+    same as `_assets` -> so `entries_to_json_list` round-trips it without
+    a base64 step. `_faq_cf_root` / `_source_url` are plain strings and
+    must survive untouched on `aem_tree` (the packager needs the former,
+    Task 9 reads the latter)."""
+    from ui.service import RunResult
+
+    d = tmp_path / "Article1"
+    d.mkdir()
+    doc_path = d / "doc.docx"
+    _write_v3_doc(doc_path, "FAQ Page")
+
+    fake_tree = {
+        "name": "p", "path": "/content/site/articles/faq-page",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_faq_cf_root": "/content/dam/site/faq",
+        "_source_url": "https://example.com/faq-page",
+        "_faq_cfs": [{"name": "q-one", "path": "/content/dam/site/faq/q-one",
+                      "primary_type": "dam:Asset", "properties": {}, "children": []}],
+    }
+    monkeypatch.setattr(
+        "ui.batch_service.run_pipeline",
+        lambda *a, **kw: RunResult(status="passed", filename="doc.docx",
+                                    issues=[], ncm={}, aem_tree=fake_tree),
+    )
+
+    result = run_batch([(f"Article1/{doc_path.name}", doc_path.read_bytes())],
+                        page_type_config=_sample_config())
+
+    entry = result.entries[0]
+    assert entry.faq_cfs == [{"name": "q-one", "path": "/content/dam/site/faq/q-one",
+                               "primary_type": "dam:Asset", "properties": {}, "children": []}]
+    assert "_faq_cfs" not in entry.aem_tree
+    assert entry.aem_tree["_faq_cf_root"] == "/content/dam/site/faq"
+    assert entry.aem_tree["_source_url"] == "https://example.com/faq-page"
+
+
+def test_batch_entries_json_round_trip_preserves_faq_cfs(tmp_path, monkeypatch):
+    from ui.batch_service import entries_from_json_list, entries_to_json_list
+    from ui.service import RunResult
+
+    d = tmp_path / "Article1"
+    d.mkdir()
+    doc_path = d / "doc.docx"
+    _write_v3_doc(doc_path, "FAQ Page")
+
+    fake_tree = {
+        "name": "p", "path": "/content/site/articles/faq-page",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_faq_cf_root": "/content/dam/site/faq",
+        "_faq_cfs": [{"name": "q-one", "path": "/content/dam/site/faq/q-one",
+                      "primary_type": "dam:Asset", "properties": {}, "children": []}],
+    }
+    monkeypatch.setattr(
+        "ui.batch_service.run_pipeline",
+        lambda *a, **kw: RunResult(status="passed", filename="doc.docx",
+                                    issues=[], ncm={}, aem_tree=fake_tree),
+    )
+
+    result = run_batch([(f"Article1/{doc_path.name}", doc_path.read_bytes())],
+                        page_type_config=_sample_config())
+
+    rows = entries_to_json_list(result.entries)
+    restored = entries_from_json_list(rows)
+
+    assert restored[0].faq_cfs == result.entries[0].faq_cfs

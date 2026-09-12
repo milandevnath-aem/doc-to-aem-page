@@ -275,3 +275,67 @@ def test_batch_package_with_assets_is_deterministic():
     )
     m = _meta()
     assert build_batch_package([tree], m) == build_batch_package([tree], m)
+
+
+def _cf_tree(path, name):
+    return {"name": name, "path": path, "primary_type": "dam:Asset",
+            "properties": {"jcr:mixinTypes": ["mix:referenceable"]},
+            "children": [{"name": "jcr:content", "primary_type": "dam:AssetContent",
+                          "properties": {"contentFragment": True, "jcr:title": "Q?"},
+                          "children": []}]}
+
+
+def test_batch_package_writes_cf_content_xml_and_filter_root():
+    from aem.package_generator.package import build_batch_package
+
+    tree = {"name": "p", "path": "/content/iffcotokio/en/health-insurance/p",
+            "primary_type": "cq:Page", "properties": {}, "children": [],
+            "_faq_cfs": [_cf_tree(
+                "/content/dam/x/faq/health-insurance/q-one", "q-one")]}
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        names = zf.namelist()
+        assert "jcr_root/content/dam/x/faq/health-insurance/q-one/.content.xml" in names
+        cf_xml = zf.read(
+            "jcr_root/content/dam/x/faq/health-insurance/q-one/.content.xml").decode()
+        assert 'jcr:primaryType="dam:Asset"' in cf_xml
+        assert 'contentFragment="{Boolean}true"' in cf_xml
+        filters = zf.read("META-INF/vault/filter.xml").decode()
+        assert '<filter root="/content/dam/x/faq/health-insurance/q-one"/>' in filters
+
+
+def test_batch_package_writes_sling_folder_for_each_cf_hierarchy_level():
+    from aem.package_generator.package import build_batch_package
+
+    tree = {"name": "p", "path": "/content/iffcotokio/en/p", "primary_type": "cq:Page",
+            "properties": {}, "children": [],
+            "_faq_cf_root": "/content/dam/x/faq",
+            "_faq_cfs": [_cf_tree(
+                "/content/dam/x/faq/health-insurance/family/q-one", "q-one")]}
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        for folder in ("health-insurance", "health-insurance/family"):
+            xml = zf.read(f"jcr_root/content/dam/x/faq/{folder}/.content.xml").decode()
+            assert 'jcr:primaryType="sling:Folder"' in xml
+
+
+def test_cf_key_does_not_leak_into_page_xml():
+    from aem.package_generator.package import build_batch_package
+
+    tree = {"name": "p", "path": "/content/iffcotokio/en/p", "primary_type": "cq:Page",
+            "properties": {}, "children": [],
+            "_faq_cfs": [_cf_tree("/content/dam/x/faq/q", "q")]}
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        page_xml = zf.read("jcr_root/content/iffcotokio/en/p/.content.xml").decode()
+        assert "_faq_cfs" not in page_xml
+
+
+def test_batch_package_is_byte_identical_across_builds_with_cfs():
+    from aem.package_generator.package import build_batch_package
+
+    tree = {"name": "p", "path": "/content/iffcotokio/en/p", "primary_type": "cq:Page",
+            "properties": {}, "children": [],
+            "_faq_cfs": [_cf_tree("/content/dam/x/faq/a/q", "q")]}
+    meta = PackageMeta(name="b")
+    assert build_batch_package([tree], meta) == build_batch_package([tree], meta)

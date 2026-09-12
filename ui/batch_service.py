@@ -31,6 +31,10 @@ class BatchEntry:
     # decodes them back. Package build re-attaches them to aem_tree
     # under `_assets` for the packager to bundle.
     assets: list[dict] = field(default_factory=list)
+    # Task 7: FAQ Content Fragment node trees (Task 6). Already JSON-safe
+    # (no raw bytes), so unlike `assets` it round-trips with no base64
+    # step. Package build re-attaches it to aem_tree under `_faq_cfs`.
+    faq_cfs: list[dict] = field(default_factory=list)
     error: str | None = None
 
 
@@ -131,11 +135,19 @@ def run_batch(
                 result.aem_tree.pop("_assets", [])
                 if result.aem_tree else []
             )
+            # Pop `_faq_cfs` the same way -- `_faq_cf_root` and
+            # `_source_url` stay on the tree: plain strings, they
+            # survive the JSON round-trip untouched.
+            page_cfs_out = (
+                result.aem_tree.pop("_faq_cfs", [])
+                if result.aem_tree else []
+            )
             entries.append(BatchEntry(
                 folder=folder, filename=filename,
                 page_path=page_path, status=result.status,
                 issues=result.issues, aem_tree=result.aem_tree,
                 assets=page_assets_out,
+                faq_cfs=page_cfs_out,
             ))
 
     return BatchResult(filename_top=top_folder, entries=entries)

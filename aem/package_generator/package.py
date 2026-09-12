@@ -83,6 +83,28 @@ def _multi_filter_xml(page_paths: list[str]) -> str:
     )
 
 
+_SLING_FOLDER_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<jcr:root xmlns:sling="http://sling.apache.org/jcr/sling/1.0"'
+    ' xmlns:jcr="http://www.jcp.org/jcr/1.0"\n'
+    '    jcr:primaryType="sling:Folder"/>\n'
+)
+
+
+def _cf_folder_entries(cf_root: str, cf_path: str) -> dict[str, str]:
+    """A sling:Folder descriptor for every hierarchy level between the CF root
+    and the fragment, so an install into a fresh tree creates real folders
+    rather than leaving FileVault to guess a node type."""
+    relative = cf_path[len(cf_root):].strip("/")
+    segments = relative.split("/")[:-1]   # drop the fragment itself
+    entries: dict[str, str] = {}
+    current = cf_root.rstrip("/")
+    for segment in segments:
+        current = f"{current}/{segment}"
+        entries[f"jcr_root{current}/.content.xml"] = _SLING_FOLDER_XML
+    return entries
+
+
 def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
     """Multi-page variant of build_package: one .zip covers N pages, the
     filter.xml lists one root per page so a single install writes them
@@ -90,11 +112,16 @@ def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
 
     When a tree carries `_assets` (Phase 2B), the packager emits a
     dam:Asset `.content.xml` + raw-binary pair for each asset and adds
-    its DAM path to the filter list too. The `_assets` key itself is
-    stripped from the tree before serialization so it never leaks into
-    the page XML as an unknown JCR property.
+    its DAM path to the filter list too. When a tree carries `_faq_cfs`
+    (Task 6), the packager emits a `.content.xml` per fragment, a
+    sling:Folder `.content.xml` for each DAM hierarchy level between
+    `_faq_cf_root` and the fragment, and adds each fragment path to the
+    filter list. None of `_assets` / `_faq_cfs` / `_faq_cf_root` /
+    `path` are read by `node_to_content_xml`, so they never leak into
+    the page XML as unknown JCR properties.
     """
     all_asset_paths: list[str] = []
+    all_cf_paths: list[str] = []
     entries: dict[str, str | bytes] = {
         "META-INF/vault/properties.xml": _properties_xml(meta),
     }
@@ -106,17 +133,24 @@ def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
         # `_assets` sitting on the dict does NOT leak into the XML.
         assets = tree.get("_assets") if isinstance(tree, dict) else None
         entries[f"jcr_root{tree['path']}/.content.xml"] = node_to_content_xml(tree)
-        if not assets:
-            continue
-        for asset in assets:
-            dam_path = asset["dam_path"]
-            all_asset_paths.append(dam_path)
-            entries[f"jcr_root{dam_path}/.content.xml"] = _dam_asset_xml(asset["filename"])
-            entries[f"jcr_root{dam_path}/_jcr_content/renditions/original"] = asset["bytes"]
+        if assets:
+            for asset in assets:
+                dam_path = asset["dam_path"]
+                all_asset_paths.append(dam_path)
+                entries[f"jcr_root{dam_path}/.content.xml"] = _dam_asset_xml(asset["filename"])
+                entries[f"jcr_root{dam_path}/_jcr_content/renditions/original"] = asset["bytes"]
+
+        cf_root = tree.get("_faq_cf_root") or ""
+        for cf in (tree.get("_faq_cfs") or []):
+            cf_path = cf["path"]
+            all_cf_paths.append(cf_path)
+            entries[f"jcr_root{cf_path}/.content.xml"] = node_to_content_xml(cf)
+            if cf_root:
+                entries.update(_cf_folder_entries(cf_root, cf_path))
 
     # Filter roots emit in a stable order so the built package stays
     # byte-identical for identical inputs.
-    filter_roots = [t["path"] for t in trees] + all_asset_paths
+    filter_roots = [t["path"] for t in trees] + all_asset_paths + all_cf_paths
     entries["META-INF/vault/filter.xml"] = _multi_filter_xml(filter_roots)
 
     buf = BytesIO()
