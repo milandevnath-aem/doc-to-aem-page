@@ -88,6 +88,28 @@ def _unwrap_config(payload: dict) -> dict:
     return inner
 
 
+def cf_exists(client: httpx.Client, base_url: str, cf_path: str,
+              auth_token: str | None = None) -> str:
+    """Is a Content Fragment already at `cf_path`?
+
+    Returns "yes", "no", or "unknown". Never raises: the package must build
+    with AEM down, and a report that says "unknown" is honest where one that
+    says "no" would be a guess.
+    """
+    base = base_url.rstrip("/")
+    path = cf_path if cf_path.startswith("/") else f"/{cf_path}"
+    headers = {"authorization": auth_token} if auth_token else None
+    try:
+        response = client.get(f"{base}{path}.1.json", headers=headers, timeout=5.0)
+    except httpx.HTTPError:
+        return "unknown"
+    if response.status_code == 200:
+        return "yes"
+    if response.status_code == 404:
+        return "no"
+    return "unknown"
+
+
 def fetch_or_cached(
     client: httpx.Client,
     base_url: str,

@@ -12,7 +12,10 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
+
 from aem_client.config import PageTypeConfig
+from aem_client.fetcher import cf_exists
 from mapping.slug import UNRESOLVED_SLUG
 from ui.service import run_pipeline
 
@@ -44,9 +47,32 @@ class BatchResult:
     entries: list[BatchEntry]
 
 
+def _annotate_collisions(entries: list[BatchEntry], aem_base_url: str | None,
+                         auth_token: str | None) -> None:
+    """Stamp every fragment with whether its path is already occupied in AEM.
+
+    The chosen policy is overwrite, so this changes nothing about what the
+    package does -- it only makes the report able to say what was overwritten.
+    With no AEM configured, every fragment reports "unknown" rather than the
+    guess that its path is free.
+    """
+    pending = [cf for entry in entries for cf in entry.faq_cfs]
+    if not pending:
+        return
+    if not aem_base_url:
+        for cf in pending:
+            cf["collision"] = "unknown"
+        return
+    with httpx.Client() as client:
+        for cf in pending:
+            cf["collision"] = cf_exists(client, aem_base_url, cf["path"], auth_token)
+
+
 def run_batch(
     files: list[tuple[str, bytes]],
     page_type_config: PageTypeConfig | None = None,
+    aem_base_url: str | None = None,
+    auth_token: str | None = None,
 ) -> BatchResult:
     """Run the pipeline once per (relative_path, docx_bytes) pair.
 
@@ -150,6 +176,7 @@ def run_batch(
                 faq_cfs=page_cfs_out,
             ))
 
+    _annotate_collisions(entries, aem_base_url, auth_token)
     return BatchResult(filename_top=top_folder, entries=entries)
 
 

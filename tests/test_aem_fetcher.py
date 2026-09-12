@@ -15,6 +15,7 @@ import pytest
 from aem_client.config import PageTypeConfig
 from aem_client.fetcher import (
     FetchError,
+    cf_exists,
     fetch_page_type_config,
     fetch_or_cached,
 )
@@ -255,3 +256,35 @@ def test_fetch_or_cached_raises_when_no_network_and_no_cache(tmp_path):
         with pytest.raises(FetchError):
             fetch_or_cached(client, "http://localhost:4502",
                             "/content/dam/x/article", cache_path)
+
+
+# ---- Task 8: CF collision probe ----
+
+def test_cf_exists_reports_yes_on_200():
+    def handler(request):
+        return httpx.Response(200, json={"jcr:primaryType": "dam:Asset"})
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert cf_exists(client, "http://localhost:4502", "/content/dam/x/q") == "yes"
+
+
+def test_cf_exists_reports_no_on_404():
+    def handler(request):
+        return httpx.Response(404)
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert cf_exists(client, "http://localhost:4502", "/content/dam/x/q") == "no"
+
+
+def test_cf_exists_reports_unknown_when_aem_unreachable():
+    """The package must still build offline; the report says so honestly
+    rather than claiming the path is free."""
+    def handler(request):
+        raise httpx.ConnectError("refused")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert cf_exists(client, "http://localhost:4502", "/content/dam/x/q") == "unknown"
+
+
+def test_cf_exists_reports_unknown_on_unexpected_status():
+    def handler(request):
+        return httpx.Response(500)
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert cf_exists(client, "http://localhost:4502", "/content/dam/x/q") == "unknown"

@@ -206,7 +206,12 @@ def run_batch_route(all_files: list[UploadFile] = File(...)):
 
     site = load_site_config(SITE_CONFIG_PATH)
     page_type_cfg, _ = _current_page_type_config(site.active_page_type)
-    result = run_batch(files, page_type_config=page_type_cfg)
+    result = run_batch(
+        files,
+        page_type_config=page_type_cfg,
+        aem_base_url=site.aem_base_url,
+        auth_token=os.environ.get(site.auth_token_env),
+    )
     run_id = save_batch_run(result)
     return RedirectResponse(f"/batch-runs/{run_id}", status_code=303)
 

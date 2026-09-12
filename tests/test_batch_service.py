@@ -376,7 +376,8 @@ def test_batch_pops_faq_cfs_but_leaves_cf_root_and_source_url_on_tree(tmp_path, 
 
     entry = result.entries[0]
     assert entry.faq_cfs == [{"name": "q-one", "path": "/content/dam/site/faq/q-one",
-                               "primary_type": "dam:Asset", "properties": {}, "children": []}]
+                               "primary_type": "dam:Asset", "properties": {}, "children": [],
+                               "collision": "unknown"}]
     assert "_faq_cfs" not in entry.aem_tree
     assert entry.aem_tree["_faq_cf_root"] == "/content/dam/site/faq"
     assert entry.aem_tree["_source_url"] == "https://example.com/faq-page"
@@ -411,3 +412,77 @@ def test_batch_entries_json_round_trip_preserves_faq_cfs(tmp_path, monkeypatch):
     restored = entries_from_json_list(rows)
 
     assert restored[0].faq_cfs == result.entries[0].faq_cfs
+
+
+# ---- Task 8: collision detection against live AEM ----
+
+def _fake_tree_with_one_faq_cf():
+    return {
+        "name": "p", "path": "/content/site/articles/faq-page",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_faq_cf_root": "/content/dam/site/faq",
+        "_faq_cfs": [{"name": "q-one", "path": "/content/dam/site/faq/q-one",
+                      "primary_type": "dam:Asset", "properties": {}, "children": []}],
+    }
+
+
+def test_batch_with_no_aem_base_url_stamps_unknown_and_makes_no_network_call(
+    tmp_path, monkeypatch,
+):
+    """No AEM configured -> every fragment reports "unknown" honestly,
+    and _annotate_collisions must not touch the network to get there."""
+    from ui.service import RunResult
+
+    d = tmp_path / "Article1"
+    d.mkdir()
+    doc_path = d / "doc.docx"
+    _write_v3_doc(doc_path, "FAQ Page")
+
+    monkeypatch.setattr(
+        "ui.batch_service.run_pipeline",
+        lambda *a, **kw: RunResult(status="passed", filename="doc.docx",
+                                    issues=[], ncm={}, aem_tree=_fake_tree_with_one_faq_cf()),
+    )
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("cf_exists must not be called with no aem_base_url")
+    monkeypatch.setattr("ui.batch_service.cf_exists", _no_network)
+
+    result = run_batch([(f"Article1/{doc_path.name}", doc_path.read_bytes())],
+                        page_type_config=_sample_config())
+
+    assert result.entries[0].faq_cfs[0]["collision"] == "unknown"
+
+
+def test_batch_with_aem_base_url_annotates_each_faq_cf_via_cf_exists(
+    tmp_path, monkeypatch,
+):
+    from ui.service import RunResult
+
+    d = tmp_path / "Article1"
+    d.mkdir()
+    doc_path = d / "doc.docx"
+    _write_v3_doc(doc_path, "FAQ Page")
+
+    monkeypatch.setattr(
+        "ui.batch_service.run_pipeline",
+        lambda *a, **kw: RunResult(status="passed", filename="doc.docx",
+                                    issues=[], ncm={}, aem_tree=_fake_tree_with_one_faq_cf()),
+    )
+
+    calls = []
+
+    def _fake_cf_exists(client, base_url, cf_path, auth_token=None):
+        calls.append((base_url, cf_path, auth_token))
+        return "yes"
+    monkeypatch.setattr("ui.batch_service.cf_exists", _fake_cf_exists)
+
+    result = run_batch(
+        [(f"Article1/{doc_path.name}", doc_path.read_bytes())],
+        page_type_config=_sample_config(),
+        aem_base_url="http://localhost:4502",
+        auth_token="tok",
+    )
+
+    assert result.entries[0].faq_cfs[0]["collision"] == "yes"
+    assert calls == [("http://localhost:4502", "/content/dam/site/faq/q-one", "tok")]
