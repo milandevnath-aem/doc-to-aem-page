@@ -12,6 +12,7 @@ fetched or loaded from samples.
 import pytest
 
 from aem_client.config import (
+    FaqConfig,
     PageTypeConfig,
     SiteConfig,
     load_page_type_config,
@@ -321,3 +322,60 @@ def test_enable_sub_base_image_sorting_defaults_false_when_absent():
     }
     cfg = PageTypeConfig.from_dict(raw)
     assert cfg.enable_sub_base_image_sorting is False
+
+
+# ---- FaqConfig: FAQ half of the pipeline (Task 5) ----
+
+def test_faq_config_from_dict_normalizes_camel_case():
+    raw = {
+        "cfRoot": "/content/dam/iffcotokio/content-fragments/faq",
+        "cfModel": "/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+        "tagNamespace": "iffcotokio",
+        "fieldNames": {"question": "question", "answer": "answer",
+                       "answerHTML": "answerHTML", "category": "faqCategory"},
+        "pageComponent": {"resourceType": "iffcotokio/components/faq"},
+    }
+    cfg = FaqConfig.from_dict(raw)
+    assert cfg.cf_root == "/content/dam/iffcotokio/content-fragments/faq"
+    assert cfg.cf_model == "/conf/iffcotokio/settings/dam/cfm/models/faq-template"
+    assert cfg.tag_namespace == "iffcotokio"
+    assert cfg.page_component == {"resourceType": "iffcotokio/components/faq"}
+
+
+def test_faq_config_defaults_namespace_and_field_names():
+    cfg = FaqConfig(cf_root="/content/dam/x/faq", cf_model="/conf/x/faq-template")
+    assert cfg.tag_namespace == "iffcotokio"
+    assert cfg.field_names == {
+        "question": "question", "answer": "answer",
+        "answerHTML": "answerHTML", "category": "faqCategory",
+    }
+    assert cfg.page_component == {}
+
+
+def test_faq_config_from_dict_missing_required_raises():
+    with pytest.raises(KeyError):
+        FaqConfig.from_dict({"cfRoot": "/content/dam/x/faq"})  # missing cfModel
+
+
+def test_page_type_config_faq_defaults_to_none():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_url", "componentMappings": {},
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert cfg.faq is None
+
+
+def test_page_type_config_from_dict_builds_nested_faq_config():
+    raw = {
+        "type": "article", "templatePath": "/x", "contentRoot": "/y", "damRoot": "/z",
+        "pageNameStrategy": "slug_from_url", "componentMappings": {},
+        "faq": {
+            "cfRoot": "/content/dam/iffcotokio/content-fragments/faq",
+            "cfModel": "/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+        },
+    }
+    cfg = PageTypeConfig.from_dict(raw)
+    assert isinstance(cfg.faq, FaqConfig)
+    assert cfg.faq.cf_root == "/content/dam/iffcotokio/content-fragments/faq"
+    assert cfg.faq.cf_model == "/conf/iffcotokio/settings/dam/cfm/models/faq-template"

@@ -37,6 +37,38 @@ class SiteConfig:
 
 
 @dataclass
+class FaqConfig:
+    """Everything the FAQ half of the pipeline needs from AEM. Absent from the
+    CF means FAQ Content Fragments are not generated at all."""
+    cf_root: str
+    cf_model: str
+    tag_namespace: str = "iffcotokio"
+    field_names: dict = field(default_factory=lambda: {
+        "question": "question", "answer": "answer",
+        "answerHTML": "answerHTML", "category": "faqCategory",
+    })
+    page_component: dict = field(default_factory=dict)
+
+    _RENAME = {
+        "cfRoot": "cf_root", "cfModel": "cf_model",
+        "tagNamespace": "tag_namespace", "fieldNames": "field_names",
+        "pageComponent": "page_component",
+    }
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "FaqConfig":
+        normalized = {}
+        for k, v in raw.items():
+            snake = cls._RENAME.get(k, k)
+            if snake in cls.__dataclass_fields__:
+                normalized[snake] = v
+        missing = {"cf_root", "cf_model"} - normalized.keys()
+        if missing:
+            raise KeyError(f"faq config missing required fields: {sorted(missing)}")
+        return cls(**normalized)
+
+
+@dataclass
 class PageTypeConfig:
     type: str
     template_path: str        # AEM cq:Template JCR path
@@ -71,6 +103,10 @@ class PageTypeConfig:
     # filenames. Default False = flat layout <dam_root>/<filename>, which
     # matches the existing hand-authored asset convention.
     enable_sub_base_image_sorting: bool = False
+    # FAQ half of the pipeline (Content Fragment root/model/tags/field
+    # names). None means the CF declares no faq block -- pages still
+    # build, FAQ fragments are simply not generated.
+    faq: "FaqConfig | None" = None
 
     # ----- camelCase / JCR-key input from AEM CF -> snake_case fields ----
     _RENAME = {
@@ -85,6 +121,7 @@ class PageTypeConfig:
         "componentSlots": "component_slots",
         "templateInitialContent": "template_initial_content",
         "enableSubBaseImageSorting": "enable_sub_base_image_sorting",
+        "faq": "faq",
     }
 
     def __post_init__(self):
@@ -120,6 +157,9 @@ class PageTypeConfig:
                     f"component_mappings['{source_name}'] is a dict but is "
                     "missing 'resourceType'"
                 )
+        raw_faq = normalized.get("faq")
+        if isinstance(raw_faq, dict):
+            normalized["faq"] = FaqConfig.from_dict(raw_faq)
         return cls(**normalized)
 
     def asset_dam_path(self, page_slug: str, filename: str) -> str:
