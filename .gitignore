@@ -17,3 +17,4 @@ ui/uploads/
 ui/static/assets/
 config/cache/
 .claude/worktrees/
+.superpowers/
