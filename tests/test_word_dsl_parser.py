@@ -478,10 +478,10 @@ def test_banner_image_marker_ignored_outside_new_hero_banner(tmp_path):
     assert "imageFile" not in block["fields"]
 
 
-def test_faq_heading_splits_page_description_into_own_block(tmp_path):
+def test_faq_heading_splits_into_own_faq_block(tmp_path):
     """Real client docs end the article body with a bold FAQ heading
     (`FAQs`, `FAQS`, `Frequently Asked Questions (FAQ)`) followed by
-    Q/A pairs. That FAQ section must land in its own page-description
+    Q/A pairs. That FAQ section must land in its own structured `faq`
     block, not fold into the main body page-description -- otherwise
     Q/A copy pollutes the article body content on the rendered page."""
     def build(doc):
@@ -506,16 +506,16 @@ def test_faq_heading_splits_page_description_into_own_block(tmp_path):
     path = _build_docx(tmp_path / "faq-split.docx", build)
     blocks = parse_docx(path)["blocks"]
 
-    # Three blocks: hero + main body page-description + FAQ page-description
+    # Three blocks: hero + main body page-description + structured faq
     names = [b["name"] for b in blocks]
     assert names == [
         "new-hero-banner",
         "page-description",   # main body
-        "page-description",   # FAQ
+        "faq",
     ], names
 
     main = blocks[1]["fields"].get("htmltext", "")
-    faq = blocks[2]["fields"].get("htmltext", "")
+    faq = blocks[2]
 
     # main body has the section title + body copy, NO FAQ
     assert "Family Health Insurance" in main
@@ -524,12 +524,13 @@ def test_faq_heading_splits_page_description_into_own_block(tmp_path):
     assert "Q1?" not in main
     assert "A1." not in main
 
-    # FAQ block carries the FAQ heading + all Q/A copy
-    assert "FAQs" in faq
-    assert "Q1?" in faq
-    assert "A1." in faq
-    assert "Q2?" in faq
-    assert "A2." in faq
+    # FAQ block carries the FAQ heading as its title, and each question as
+    # its own item with the answer as that item's htmltext
+    assert faq["fields"]["title"] == "FAQs"
+    items = faq["items"]
+    assert [i["fields"]["question"] for i in items] == ["Q1?", "Q2?"]
+    assert items[0]["fields"]["htmltext"] == "<p>A1.</p>"
+    assert items[1]["fields"]["htmltext"] == "<p>A2.</p>"
 
 
 def test_frequently_asked_questions_label_also_triggers_faq_split(tmp_path):
@@ -551,10 +552,11 @@ def test_frequently_asked_questions_label_also_triggers_faq_split(tmp_path):
 
     path = _build_docx(tmp_path / "faq-long.docx", build)
     blocks = parse_docx(path)["blocks"]
-    assert [b["name"] for b in blocks][-1] == "page-description"
-    faq_html = blocks[-1]["fields"].get("htmltext", "")
-    assert "Frequently Asked Questions" in faq_html
-    assert "Q?" in faq_html and "A." in faq_html
+    assert [b["name"] for b in blocks][-1] == "faq"
+    faq = blocks[-1]
+    assert faq["fields"]["title"] == "Frequently Asked Questions (FAQ)"
+    assert faq["items"][0]["fields"]["question"] == "Q?"
+    assert faq["items"][0]["fields"]["htmltext"] == "<p>A.</p>"
 
 
 def test_new_hero_banner_closed_on_empty_paragraph_gap(tmp_path):
@@ -713,3 +715,65 @@ def test_url_label_with_off_origin_value_is_not_captured(tmp_path):
     path = _build_docx(tmp_path / "off.docx", build)
     props = parse_docx(path, site_origin="https://www.iffcotokio.co.in")["page"]["properties"]
     assert "url" not in props
+
+
+def test_faq_section_becomes_structured_faq_block(tmp_path):
+    """A bold FAQ label opens a faq block; each bold line is a question and
+    the plain paragraphs under it are that question's answer."""
+    def build(doc):
+        doc.add_paragraph("Meta Title: T")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Banner prose.")
+        doc.add_paragraph().add_run("Body Heading").bold = True
+        doc.add_paragraph("Article body paragraph.")
+        doc.add_paragraph().add_run("FAQs").bold = True
+        doc.add_paragraph().add_run("Can parents be included?").bold = True
+        doc.add_paragraph("Yes, parents can be included.")
+        doc.add_paragraph("Subject to age limits.")
+        doc.add_paragraph().add_run("Is it mandatory?").bold = True
+        doc.add_paragraph("No, it is not mandatory.")
+
+    path = _build_docx(tmp_path / "faq.docx", build)
+    blocks = parse_docx(path)["blocks"]
+    faqs = [b for b in blocks if b["name"] == "faq"]
+    assert len(faqs) == 1
+    items = faqs[0]["items"]
+    assert [i["fields"]["question"] for i in items] == [
+        "Can parents be included?", "Is it mandatory?"]
+    assert items[0]["fields"]["htmltext"] == (
+        "<p>Yes, parents can be included.</p><p>Subject to age limits.</p>")
+    assert items[1]["fields"]["htmltext"] == "<p>No, it is not mandatory.</p>"
+
+
+def test_faq_answers_keep_bullets_as_list_markup(tmp_path):
+    def build(doc):
+        doc.add_paragraph("Meta Title: T")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Banner prose.")
+        doc.add_paragraph().add_run("FAQs").bold = True
+        doc.add_paragraph().add_run("What is covered?").bold = True
+        _add_bullet(doc, "Hospitalisation")
+        _add_bullet(doc, "Day care")
+
+    path = _build_docx(tmp_path / "faqbul.docx", build)
+    faq = [b for b in parse_docx(path)["blocks"] if b["name"] == "faq"][0]
+    assert faq["items"][0]["fields"]["htmltext"] == (
+        "<ul><li>Hospitalisation</li><li>Day care</li></ul>")
+
+
+def test_faq_label_with_no_questions_yields_empty_faq_block(tmp_path):
+    """A FAQ heading with nothing under it must not silently vanish, and must
+    not swallow the block into the article body either."""
+    def build(doc):
+        doc.add_paragraph("Meta Title: T")
+        doc.add_paragraph("Meta Description: D")
+        doc.add_paragraph("[component: new-hero-banner]")
+        doc.add_paragraph("Banner prose.")
+        doc.add_paragraph().add_run("Frequently Asked Questions").bold = True
+
+    path = _build_docx(tmp_path / "faqempty.docx", build)
+    faqs = [b for b in parse_docx(path)["blocks"] if b["name"] == "faq"]
+    assert len(faqs) == 1
+    assert faqs[0]["items"] == []

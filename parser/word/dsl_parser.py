@@ -421,8 +421,9 @@ class _DslParser:
         # paragraph OR a fully-bold `[normal]` paragraph acting as a
         # visual section title -- close the hero then and start an
         # implicit page-description so the article body doesn't fold
-        # into bannerDescription. Only fires after at least one prose
-        # paragraph has accumulated as banner description, so a bold
+        # into bannerDescription. Only fires once at least one prose
+        # paragraph has accumulated -- as either the implicit title or
+        # (once that's taken) the banner description -- so a bold
         # marker line in the same paragraph as `[component:...]`
         # can't close the hero before it has any content.
         # Empty paragraphs inside the hero act as section breaks --
@@ -442,7 +443,7 @@ class _DslParser:
             and self._component is not None
             and self._component["name"] in _BANNER_IMAGE_COMPONENTS
             and self._item is None
-            and self._component["fields"].get("description")
+            and (self._component["fields"].get("description") or self._component["fields"].get("title"))
         ):
             self._close_hero_start_implicit_page_desc()
             if is_empty:
@@ -450,19 +451,22 @@ class _DslParser:
                 # to process, and the implicit page-description is now
                 # already open for the next paragraph
                 return
-        # Bold-only "FAQ" heading inside an implicit page-description
-        # opens a NEW page-description block for the FAQ section so
-        # Q/A copy doesn't fold into the main article body block.
+        # A bold-only FAQ label opens a structured `faq` block. Everything
+        # after it is question/answer pairs, not article prose: each further
+        # bold-only line is a question, and the plain paragraphs and bullets
+        # under it are that question's answer.
         if (
             _paragraph_all_bold(paragraph)
             and self._component is not None
-            and self._component["name"] == "page-description"
             and self._item is None
-            and self._component["fields"].get("description")
             and _FAQ_LABEL_RE.match(paragraph.text.strip())
         ):
-            self._start_component("page-description", None)
-            self._active_field = "description"
+            self._start_faq(paragraph.text.strip())
+            return
+        if self._component is not None and self._component["name"] == "faq":
+            if _paragraph_all_bold(paragraph) and paragraph.text.strip():
+                self._start_faq_item(paragraph.text.strip())
+                return
         is_bullet = _has_numbering(paragraph)
         for line, spans in _paragraph_lines(paragraph):
             if not line:
@@ -489,6 +493,19 @@ class _DslParser:
         an active `description` field so plain lines flow into RTE
         without another explicit `description:` key line."""
         self._start_component("page-description", None)
+        self._active_field = "description"
+
+    def _start_faq(self, label: str) -> None:
+        """Open a faq block. `_active_field` stays None until the first
+        question arrives, so stray prose between the label and question one
+        cannot become an answer belonging to nothing."""
+        self._start_component("faq", None)
+        self._component["fields"]["title"] = label
+
+    def _start_faq_item(self, question: str) -> None:
+        self._item = {"id": None, "implicit": True,
+                      "fields": {"question": question, "description": []}}
+        self._component["items"].append(self._item)
         self._active_field = "description"
 
     def _try_capture_v3_style_meta(self, line: str) -> bool:
