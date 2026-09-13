@@ -81,6 +81,7 @@ def _dedupe_cf_paths(entries: list[BatchEntry]) -> None:
     """
     taken: set[str] = set()
     for entry in entries:
+        original = [cf["path"] for cf in entry.faq_cfs]
         clashes = 0
         for cf in entry.faq_cfs:
             path = cf["path"]
@@ -95,11 +96,13 @@ def _dedupe_cf_paths(entries: list[BatchEntry]) -> None:
             cf["batch_clash"] = path
             cf["path"] = new_path
             cf["name"] = new_path.rsplit("/", 1)[-1]
-            # The page's faq reference node (when the AEM component is
-            # configured) holds the OLD path -- rewrite it or the page
-            # would point at a fragment this batch never writes.
-            _rewrite_cf_path(entry.aem_tree, path, new_path)
             clashes += 1
+        if clashes:
+            # The page's faq reference node (when the AEM component is
+            # configured) holds the OLD paths -- re-stamp it or the page
+            # would point at fragments this batch never writes.
+            _rewrite_cf_paths(entry.aem_tree, original,
+                              [cf["path"] for cf in entry.faq_cfs])
         if clashes and entry.aem_tree is not None:
             entry.aem_tree.setdefault("_warnings", []).append(
                 f"{clashes} FAQ fragment path(s) clashed with another document "
@@ -107,19 +110,26 @@ def _dedupe_cf_paths(entries: list[BatchEntry]) -> None:
                 "batch_clash in faqs.csv.")
 
 
-def _rewrite_cf_path(node: dict | None, old: str, new: str) -> None:
-    """Replace `old` with `new` anywhere it appears as a property value in
-    the page tree (the faq component's paths property is a list)."""
+def _rewrite_cf_paths(node: dict | None, old_paths: list[str],
+                      new_paths: list[str]) -> None:
+    """Re-stamp the page's faq reference list from the final paths, in one go.
+
+    Matched by the whole list the mapper built it from, then replaced
+    wholesale. Substituting one old->new value at a time instead is wrong:
+    a later rename re-matches the value an earlier rename just wrote (doc B
+    asking "Q" and "Q 2" ends up referencing one fragment twice and
+    orphaning the other), and the package still looks fine because only the
+    page's property is wrong. `faq_cfs` is in the same order the property
+    list was built in, so a positional re-stamp is exact.
+    """
     if not node:
         return
     props = node.get("properties") or {}
     for key, value in props.items():
-        if value == old:
-            props[key] = new
-        elif isinstance(value, list):
-            props[key] = [new if v == old else v for v in value]
+        if value == old_paths:
+            props[key] = list(new_paths)
     for child in node.get("children") or []:
-        _rewrite_cf_path(child, old, new)
+        _rewrite_cf_paths(child, old_paths, new_paths)
 
 
 def run_batch(

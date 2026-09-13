@@ -674,3 +674,99 @@ def test_faq_reference_on_the_page_follows_a_renamed_fragment(tmp_path):
 
     assert referenced == [cf["path"] for cf in second.faq_cfs]
     assert referenced[0].endswith("-2")
+
+
+def _faq_ref_config() -> PageTypeConfig:
+    cfg = _faq_config()
+    cfg.faq.page_component = {"resourceType": "site/components/faq",
+                              "pathsProperty": "fragmentPaths"}
+    cfg.component_mappings = {**cfg.component_mappings, "faq": "site/components/faq"}
+    return cfg
+
+
+def _fragment_paths(tree: dict) -> list[str]:
+    found: list[str] = []
+
+    def walk(node):
+        for key, value in (node.get("properties") or {}).items():
+            if key == "fragmentPaths":
+                found.extend(value)
+        for child in node.get("children") or []:
+            walk(child)
+    walk(tree)
+    return found
+
+
+def _shipped_cf_paths(entries) -> set[str]:
+    """CF paths the package actually writes, read back out of the zip."""
+    import zipfile
+    from io import BytesIO
+
+    from aem.package_generator.package import PackageMeta, build_batch_package
+
+    trees = [{**e.aem_tree, "_faq_cfs": e.faq_cfs} for e in entries]
+    with zipfile.ZipFile(BytesIO(build_batch_package(trees, PackageMeta(name="b")))) as zf:
+        names = zf.namelist()
+    return {"/" + n[len("jcr_root/"):-len("/.content.xml")]
+            for n in names
+            if n.startswith("jcr_root/content/dam/") and n.endswith("/.content.xml")}
+
+
+def _run_two_docs(tmp_path, doc_a_qa, doc_b_qa):
+    for folder, slug, qa in [("Article1", "one", doc_a_qa), ("Article2", "two", doc_b_qa)]:
+        d = tmp_path / folder
+        d.mkdir()
+        _write_faq_doc(d / f"{slug}.docx", slug.title(),
+                       f"https://www.example.com/health-insurance/{slug}", qa)
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in sorted(tmp_path.rglob("*.docx"))]
+    return run_batch(files, page_type_config=_faq_ref_config())
+
+
+def test_page_refs_survive_two_renames_in_one_document(tmp_path):
+    """Doc B asks the clashing question twice, so BOTH its fragments are
+    renamed. Rewriting the page property one old->new value at a time made
+    the second rewrite re-match what the first had just written: one fragment
+    referenced twice, the other shipped and orphaned. The page's reference
+    list must name exactly the fragments the package writes for that page."""
+    question = "What is a family floater plan?"
+    result = _run_two_docs(
+        tmp_path,
+        [(question, "Doc A answer.")],
+        [(question, "Doc B answer."), (question, "Doc B second answer.")])
+
+    assert [e.status for e in result.entries] == ["passed", "passed"]
+    shipped = _shipped_cf_paths(result.entries)
+    second = result.entries[1]
+    refs = _fragment_paths(second.aem_tree)
+
+    assert refs == [cf["path"] for cf in second.faq_cfs]
+    assert len(refs) == len(set(refs)) == 2          # no duplicate reference
+    assert set(refs) <= shipped                      # no dangling reference
+    # every fragment this page ships is referenced by it -- nothing orphaned
+    assert {cf["path"] for cf in second.faq_cfs} <= set(refs)
+
+
+def test_page_refs_survive_a_rename_that_collides_with_a_real_sibling_slug(tmp_path):
+    """No in-document duplicate needed, which makes this the easy one to hit
+    by accident: doc B's second question genuinely slugs to `...-2`, the same
+    name the rename of its first question wants. Value substitution turned
+    both references into the same path."""
+    result = _run_two_docs(
+        tmp_path,
+        [("Is it covered?", "Doc A answer.")],
+        [("Is it covered?", "Doc B answer."),
+         ("Is it covered 2?", "Doc B other answer.")])
+
+    shipped = _shipped_cf_paths(result.entries)
+    second = result.entries[1]
+    refs = _fragment_paths(second.aem_tree)
+
+    assert [cf["path"] for cf in second.faq_cfs] == [
+        "/content/dam/site/faq/health-insurance/is-it-covered-2",
+        "/content/dam/site/faq/health-insurance/is-it-covered-2-2",
+    ]
+    assert refs == [cf["path"] for cf in second.faq_cfs]
+    assert len(refs) == len(set(refs)) == 2
+    assert set(refs) <= shipped
+    assert {cf["path"] for cf in second.faq_cfs} <= set(refs)
