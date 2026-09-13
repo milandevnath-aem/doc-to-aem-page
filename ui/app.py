@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -23,7 +24,7 @@ from aem_client.config import (
     save_site_config,
     SiteConfig,
 )
-from aem_client.fetcher import FetchError, fetch_or_cached
+from aem_client.fetcher import FetchError, fetch_and_cache
 from ui.batch_service import run_batch
 from ui.report import build_report_zip
 from ui.runs import (
@@ -74,7 +75,12 @@ def _current_page_type_config(page_type: str):
     fetch; falls back to a bundled sample; None only when neither exists."""
     cache = _page_type_cache_path(page_type)
     if cache.exists():
-        return load_page_type_config(cache), f"cached ({cache.name})"
+        # Surface the cache's age: a fetch that failed leaves an old file in
+        # place, and without a date there is nothing on screen to tell the
+        # operator the config they are looking at is not what AEM holds.
+        fetched = datetime.fromtimestamp(
+            cache.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        return load_page_type_config(cache), f"cached ({cache.name}, fetched {fetched})"
     try:
         return load_page_type_from_sample(page_type), "sample (config/samples)"
     except FileNotFoundError:
@@ -129,9 +135,19 @@ def fetch_config():
     cache = _page_type_cache_path(site.active_page_type)
     with httpx.Client() as client:
         try:
-            fetch_or_cached(client, site.aem_base_url, cf_path, cache, auth_token)
+            # fetch_and_cache, NOT fetch_or_cached: the operator asked to talk
+            # to AEM, so a rejection has to surface. The cache-fallback variant
+            # would swallow a 401 and redirect as though the fetch worked,
+            # leaving the pipeline on a stale config with no indication.
+            fetch_and_cache(client, site.aem_base_url, cf_path, cache, auth_token)
         except FetchError as exc:
-            raise HTTPException(502, f"AEM fetch failed: {exc}") from exc
+            hint = ""
+            if "401" in str(exc) or "403" in str(exc):
+                hint = (f" AEM rejected the request -- set ${site.auth_token_env}"
+                        " to an authorization header value before starting the"
+                        " server. The previously cached config is unchanged and"
+                        " still in use.")
+            raise HTTPException(502, f"AEM fetch failed: {exc}.{hint}") from exc
     return RedirectResponse("/", status_code=303)
 
 

@@ -800,3 +800,68 @@ def test_history_page_empty_state():
 
     assert response.status_code == 200
     assert "No runs yet" in response.text
+
+
+def test_fetch_config_surfaces_aem_rejection_instead_of_silently_using_cache(
+    tmp_path, monkeypatch,
+):
+    """A 401 from AEM must reach the operator. Before this, fetch_or_cached
+    swallowed it, the route redirected to "/" as though it worked, and the
+    pipeline kept running on a months-old cache -- which is how a batch of
+    real documents shipped with an empty siteOrigin."""
+    import httpx
+    from aem_client.config import SiteConfig, save_site_config
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+    save_site_config(
+        SiteConfig(aem_base_url="http://localhost:4502", active_page_type="article",
+                   cf_paths={"article": "/content/dam/x/article"}),
+        cache_dir / "site.json",
+    )
+    # seed a cache so the old fallback would have had something to hide behind
+    monkeypatch.setattr(
+        app_module, "_page_type_cache_path",
+        lambda pt: cache_dir / f"{pt}.pagetypeconfig.json",
+    )
+    from aem_client.config import load_page_type_from_sample, save_page_type_config
+    save_page_type_config(load_page_type_from_sample("article"),
+                          cache_dir / "article.pagetypeconfig.json")
+
+    def _deny(request):
+        return httpx.Response(401)
+
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        app_module.httpx, "Client",
+        lambda *a, **kw: real_client(transport=httpx.MockTransport(_deny)),
+    )
+
+    client = TestClient(app_module.app)
+    response = client.post("/config/fetch", follow_redirects=False)
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert "401" in detail
+    assert "AEM_AUTH_TOKEN" in detail          # names the env var to set
+    assert "unchanged" in detail               # says the cache was not damaged
+
+
+def test_home_page_shows_when_the_cached_config_was_fetched(tmp_path, monkeypatch):
+    """Without a date on screen there is nothing telling an operator the
+    config they are looking at is older than their last AEM change."""
+    from aem_client.config import load_page_type_from_sample, save_page_type_config
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+    monkeypatch.setattr(
+        app_module, "_page_type_cache_path",
+        lambda pt: cache_dir / f"{pt}.pagetypeconfig.json",
+    )
+    save_page_type_config(load_page_type_from_sample("article"),
+                          cache_dir / "article.pagetypeconfig.json")
+
+    text = TestClient(app_module.app).get("/").text
+    assert "fetched 20" in text and "UTC" in text

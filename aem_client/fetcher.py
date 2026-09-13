@@ -117,27 +117,27 @@ def cf_exists(client: httpx.Client, base_url: str, cf_path: str,
     return "unknown"
 
 
-def fetch_or_cached(
+def fetch_and_cache(
     client: httpx.Client,
     base_url: str,
     cf_path: str,
     cache_path,
     auth_token: str | None = None,
 ) -> PageTypeConfig:
-    """Try live AEM first, cache on success, fall back to cache on failure.
-    Raise FetchError only if neither AEM nor a cache is available.
+    """Fetch from AEM and write the cache. Raises FetchError if AEM cannot
+    be reached or refuses -- there is NO cache fallback here on purpose.
 
-    When the fetch succeeds AND the CF declares a templatePath, also pulls
-    the template's initial jcr:content tree so the mapper can use it as
-    the layout base. Template-fetch failure is non-fatal -- pipeline just
-    falls back to the flat-layout mapper on that run.
+    This is what the operator's explicit "Fetch config" action calls. They
+    asked to talk to AEM; handing back a stale cache would make a failed
+    click look like a successful one, and the pipeline would keep running
+    on config that may be months old. A failed fetch leaves any existing
+    cache untouched, so the operator keeps working while they fix it.
+
+    When the CF declares a templatePath, also pulls the template's initial
+    jcr:content tree. Template-fetch failure stays non-fatal -- the mapper
+    falls back to the flat layout for that run.
     """
-    try:
-        cfg = fetch_page_type_config(client, base_url, cf_path, auth_token)
-    except FetchError:
-        if cache_path.exists():
-            return load_page_type_config(cache_path)
-        raise
+    cfg = fetch_page_type_config(client, base_url, cf_path, auth_token)
     if cfg.template_path:
         try:
             cfg.template_initial_content = fetch_template_initial(
@@ -148,6 +148,28 @@ def fetch_or_cached(
             cfg.template_initial_content = {}
     save_page_type_config(cfg, cache_path)
     return cfg
+
+
+def fetch_or_cached(
+    client: httpx.Client,
+    base_url: str,
+    cf_path: str,
+    cache_path,
+    auth_token: str | None = None,
+) -> PageTypeConfig:
+    """Try live AEM first, cache on success, fall back to cache on failure.
+    Raise FetchError only if neither AEM nor a cache is available.
+
+    The fallback exists so package generation keeps working with AEM
+    unreachable -- a supported workflow. Callers that need to KNOW the
+    fetch succeeded must use `fetch_and_cache` instead.
+    """
+    try:
+        return fetch_and_cache(client, base_url, cf_path, cache_path, auth_token)
+    except FetchError:
+        if cache_path.exists():
+            return load_page_type_config(cache_path)
+        raise
 
 
 def fetch_template_initial(

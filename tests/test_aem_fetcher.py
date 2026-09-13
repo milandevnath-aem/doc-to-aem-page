@@ -16,6 +16,7 @@ from aem_client.config import PageTypeConfig
 from aem_client.fetcher import (
     FetchError,
     cf_exists,
+    fetch_and_cache,
     fetch_page_type_config,
     fetch_or_cached,
 )
@@ -303,3 +304,52 @@ def test_cf_exists_reports_unknown_on_none_cf_path():
     unconditional "never raises", so this must also degrade to "unknown"."""
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
     assert cf_exists(client, "http://localhost:4502", None) == "unknown"
+
+
+# ---------- explicit fetch must fail loudly ----------
+
+def test_fetch_and_cache_raises_on_401_even_when_a_cache_exists(tmp_path):
+    """An operator clicking "Fetch config" asked to talk to AEM. When AEM
+    rejects them, silently handing back a months-old cache makes the click
+    look like it worked and leaves the pipeline running on stale config --
+    the exact failure that shipped an empty siteOrigin to a real batch."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    with httpx.Client(transport=_mock_transport(200, CF_PAYLOAD)) as client:
+        fetch_and_cache(client, "http://localhost:4502",
+                        "/content/dam/x/article", cache_path)
+    assert cache_path.exists()
+
+    with httpx.Client(transport=_mock_transport(401)) as client:
+        with pytest.raises(FetchError) as excinfo:
+            fetch_and_cache(client, "http://localhost:4502",
+                            "/content/dam/x/article", cache_path)
+    assert "401" in str(excinfo.value)
+
+
+def test_fetch_and_cache_leaves_the_existing_cache_untouched_on_failure(tmp_path):
+    """A failed fetch must not damage the config the pipeline is still
+    using -- the operator keeps working while they fix their credentials."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    with httpx.Client(transport=_mock_transport(200, CF_PAYLOAD)) as client:
+        fetch_and_cache(client, "http://localhost:4502",
+                        "/content/dam/x/article", cache_path)
+    before = cache_path.read_text(encoding="utf-8")
+
+    with httpx.Client(transport=_mock_transport(err=httpx.ConnectError)) as client:
+        with pytest.raises(FetchError):
+            fetch_and_cache(client, "http://localhost:4502",
+                            "/content/dam/x/article", cache_path)
+    assert cache_path.read_text(encoding="utf-8") == before
+
+
+def test_fetch_or_cached_still_falls_back_so_offline_runs_keep_working(tmp_path):
+    """The read path keeps its fallback: generating packages with AEM
+    unreachable is a supported workflow. Only the explicit fetch is loud."""
+    cache_path = tmp_path / "article.pagetypeconfig.json"
+    with httpx.Client(transport=_mock_transport(200, CF_PAYLOAD)) as client:
+        fetch_or_cached(client, "http://localhost:4502",
+                        "/content/dam/x/article", cache_path)
+    with httpx.Client(transport=_mock_transport(401)) as client:
+        cfg = fetch_or_cached(client, "http://localhost:4502",
+                              "/content/dam/x/article", cache_path)
+    assert cfg.type == "article"
