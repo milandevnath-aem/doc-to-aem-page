@@ -9,7 +9,7 @@ from pathlib import Path
 
 import docx
 
-from aem_client.config import PageTypeConfig
+from aem_client.config import FaqConfig, PageTypeConfig
 from ui.batch_service import run_batch
 
 
@@ -548,3 +548,129 @@ def test_batch_with_aem_base_url_annotates_each_faq_cf_via_cf_exists(
 
     assert result.entries[0].faq_cfs[0]["collision"] == "yes"
     assert calls == [("http://localhost:4502", "/content/dam/site/faq/q-one", "tok")]
+
+
+# ---- Final review, Finding 1: cross-document CF path collision ----
+
+def _faq_config() -> PageTypeConfig:
+    cfg = _sample_config()
+    cfg.page_name_strategy = "slug_from_url"
+    cfg.content_root = "/content/site/en"
+    cfg.site_origin = "https://www.example.com"
+    cfg.faq = FaqConfig(cf_root="/content/dam/site/faq", cf_model="/conf/m",
+                        tag_namespace="site")
+    return cfg
+
+
+def _write_faq_doc(path: Path, title: str, url: str, qa: list[tuple[str, str]]) -> None:
+    document = docx.Document()
+    document.add_paragraph().add_run(title).bold = True
+    document.add_paragraph(f"Meta Title: {title}")
+    document.add_paragraph("Meta Description: Some description.")
+    document.add_paragraph(f"New Required URL: {url}")
+    document.add_paragraph("Body content.")
+    document.add_paragraph().add_run("FAQs").bold = True
+    for question, answer in qa:
+        document.add_paragraph().add_run(question).bold = True
+        document.add_paragraph(answer)
+    document.save(str(path))
+
+
+def test_two_docs_sharing_a_question_keep_both_answers_and_report_the_clash(tmp_path):
+    """Two documents in the same URL section asking the same question derive
+    the SAME fragment path. The packager keys entries by path, so without
+    batch-wide uniqueness the second answer overwrites the first and one
+    answer ships missing with no issue, no error and no flag. Both answers
+    must survive AND the clash must be visible to the operator."""
+    import zipfile
+    from io import BytesIO
+
+    from aem.package_generator.package import PackageMeta, build_batch_package
+    from ui.report import build_report_zip
+
+    question = "What is a family floater plan?"
+    for folder, name, slug, answer in [
+        ("Article1", "One", "one", "One policy covers the whole family."),
+        ("Article2", "Two", "two", "A totally different explanation entirely."),
+    ]:
+        d = tmp_path / folder
+        d.mkdir()
+        _write_faq_doc(d / f"{slug}.docx", name,
+                       f"https://www.example.com/health-insurance/{slug}",
+                       [(question, answer)])
+
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in sorted(tmp_path.rglob("*.docx"))]
+
+    result = run_batch(files, page_type_config=_faq_config())
+
+    assert [e.status for e in result.entries] == ["passed", "passed"]
+    paths = [cf["path"] for e in result.entries for cf in e.faq_cfs]
+    assert len(paths) == 2
+    assert len(set(paths)) == 2, "fragment paths must be unique batch-wide"
+
+    # 1. no answer is lost from the package
+    trees = []
+    for entry in result.entries:
+        tree = {**entry.aem_tree, "_faq_cfs": entry.faq_cfs}
+        trees.append(tree)
+    data = build_batch_package(trees, PackageMeta(name="batch"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        xml = "".join(zf.read(n).decode() for n in zf.namelist()
+                      if n.endswith(".content.xml"))
+        filter_xml = zf.read("META-INF/vault/filter.xml").decode()
+    assert "One policy covers the whole family." in xml
+    assert "A totally different explanation entirely." in xml
+    # one filter root per fragment, none repeated
+    roots = [line for line in filter_xml.splitlines() if "<filter root=" in line]
+    assert len(roots) == len(set(roots)) == 4      # 2 pages + 2 fragments
+
+    # 2. the clash is visible in the report
+    import csv as csv_mod
+    import io as io_mod
+    with zipfile.ZipFile(BytesIO(build_report_zip(result))) as zf:
+        faqs = list(csv_mod.DictReader(io_mod.StringIO(
+            zf.read("faqs.csv").decode("utf-8-sig"))))
+        pages = list(csv_mod.DictReader(io_mod.StringIO(
+            zf.read("pages.csv").decode("utf-8-sig"))))
+    clashed = [r for r in faqs if r["batch_clash"]]
+    assert len(clashed) == 1
+    assert clashed[0]["batch_clash"] == \
+        "/content/dam/site/faq/health-insurance/what-is-a-family-floater-plan"
+    assert clashed[0]["cf_path"] == clashed[0]["batch_clash"] + "-2"
+    assert any("clashed" in row["warnings"] for row in pages)
+
+
+def test_faq_reference_on_the_page_follows_a_renamed_fragment(tmp_path):
+    """The page's fragmentPaths property is built from the pre-rename paths --
+    it has to be rewritten too, or the page points at a fragment this batch
+    never writes."""
+    cfg = _faq_config()
+    cfg.faq.page_component = {"resourceType": "site/components/faq",
+                              "pathsProperty": "fragmentPaths"}
+    cfg.component_mappings = {**cfg.component_mappings, "faq": "site/components/faq"}
+    question = "What is a family floater plan?"
+    for folder, slug in [("Article1", "one"), ("Article2", "two")]:
+        d = tmp_path / folder
+        d.mkdir()
+        _write_faq_doc(d / f"{slug}.docx", slug.title(),
+                       f"https://www.example.com/health-insurance/{slug}",
+                       [(question, f"Answer for {slug}.")])
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in sorted(tmp_path.rglob("*.docx"))]
+
+    result = run_batch(files, page_type_config=cfg)
+
+    second = result.entries[1]
+    referenced = []
+
+    def walk(node):
+        for key, value in (node.get("properties") or {}).items():
+            if key == "fragmentPaths":
+                referenced.extend(value)
+        for child in node.get("children") or []:
+            walk(child)
+    walk(second.aem_tree)
+
+    assert referenced == [cf["path"] for cf in second.faq_cfs]
+    assert referenced[0].endswith("-2")

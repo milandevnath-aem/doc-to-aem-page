@@ -84,10 +84,10 @@ _BANNER_IMAGE_COMPONENTS = {"new-hero-banner"}
 
 # Bold-only paragraph text that reliably marks the FAQ section in real
 # client docs. `FAQ`, `FAQs`, `FAQS`, or the long form with an optional
-# `(FAQ)` suffix -- any casing. When the parser hits one of these
-# inside an implicit page-description block it opens a NEW
-# page-description block so the FAQ copy doesn't fold into the main
-# body page-description on the rendered page.
+# `(FAQ)` suffix -- any casing. When the parser hits one of these it
+# opens a structured `faq` block: every later bold-alone line is a
+# question, and the plain paragraphs/bullets under it are that
+# question's answer.
 _FAQ_LABEL_RE = re.compile(
     r"^(?:faqs?|frequently\s+asked\s+questions(?:\s*\(faq\))?)\s*$", re.I,
 )

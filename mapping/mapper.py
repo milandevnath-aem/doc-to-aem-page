@@ -87,15 +87,37 @@ def map_ncm_to_node_tree(
         # kept on the page node so batch-mode iterates assets per-page
         # in the same shape it iterates the multi-root filter.
         tree["_assets"] = resolved_assets
+    # `_source_url` feeds the batch report's `url` column, so it is set
+    # whenever the doc HAS a url -- a doc with a perfectly good URL and no
+    # FAQ section must not report a blank url, which is the one thing that
+    # column exists to tell apart from "this doc had no URL".
+    source_url = ncm["page"]["properties"].get("url") or ""
+    if source_url:
+        tree["_source_url"] = source_url
     if faq_cfs:
         # Stripped by the packager before XML serialization, exactly like
         # `_assets`. `_faq_cf_root` saves the packager from reverse-engineering
-        # where the hierarchy starts inside a fragment path; `_source_url`
-        # feeds the batch report's `url` column.
+        # where the hierarchy starts inside a fragment path.
         tree["_faq_cfs"] = faq_cfs
         tree["_faq_cf_root"] = cfg.faq.cf_root
-        tree["_source_url"] = ncm["page"]["properties"].get("url") or ""
+        if not hierarchy:
+            # Fragments were generated but no section hierarchy could be
+            # derived: they land flat under cfRoot with no faqCategory tags.
+            # Silent mis-filing otherwise -- surface it so the batch report
+            # can show it in pages.csv.
+            _warn(tree,
+                  "FAQ fragments have no section hierarchy: they land flat "
+                  f"under {cfg.faq.cf_root} with no faqCategory tags. Most "
+                  "likely siteOrigin is unset in the config or does not match "
+                  f"the doc's URL ({source_url or 'none found'}).")
     return tree
+
+
+def _warn(tree: dict, message: str) -> None:
+    """Operator-facing warning carried on the page tree. Read by the batch
+    report's `warnings` column; ignored by the packager like every other
+    underscore key."""
+    tree.setdefault("_warnings", []).append(message)
 
 
 # Components whose `title` field is authoritatively sourced from the

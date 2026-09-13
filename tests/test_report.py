@@ -109,3 +109,52 @@ def test_ordinary_values_pass_through_byte_identical():
     assert rows[0]["question"] == "Q one?"
     assert rows[0]["cf_path"] == "/content/dam/x/faq/health-insurance/family/q-one"
     assert rows[0]["collision"] == "no"
+
+
+def test_faq_rows_read_the_configured_field_names_not_hardcoded_ones():
+    """`faq.fieldNames` renames the master properties, so a report that reads
+    "answer"/"faqCategory" literally reports an empty category and a
+    zero-length answer for a perfectly good fragment. Built through the real
+    mapper so the two halves of the contract are tested together."""
+    from aem_client.config import FaqConfig, PageTypeConfig
+    from mapping.faq_cf import build_faq_cf_trees
+
+    cfg = PageTypeConfig(
+        type="article", template_path="/conf/t", content_root="/content/x",
+        dam_root="/content/dam/x", page_name_strategy="slug_from_url",
+        component_mappings={},
+        faq=FaqConfig(cf_root="/content/dam/x/faq", cf_model="/conf/m",
+                      tag_namespace="iffcotokio",
+                      field_names={"question": "q", "answer": "answerText",
+                                   "answerHTML": "answerRich", "category": "tags"}),
+    )
+    ncm = {"page": {"properties": {}}, "source": {"path": "x.docx"},
+           "blocks": [{"name": "faq", "variant": None, "fields": {"title": "FAQs"},
+                       "table": None, "items": [
+                           {"id": None, "implicit": True,
+                            "fields": {"question": "Is it covered?",
+                                       "htmltext": "<p>Yes it is.</p>"}}]}]}
+    cfs = build_faq_cf_trees(ncm, cfg, ["health-insurance"])
+
+    rows = _read(build_report_zip(BatchResult(
+        filename_top="X", entries=[_entry(faq_cfs=cfs)])), "faqs.csv")
+
+    assert rows[0]["faq_category"] == "iffcotokio:health-insurance"
+    assert rows[0]["answer_chars"] == str(len("Yes it is."))
+
+
+def test_pages_csv_shows_tree_warnings():
+    """Warnings the mapper/batch service put on the tree (mis-filed fragments,
+    cross-document path clashes) must reach the operator in pages.csv without
+    them having to open anything else."""
+    entry = _entry(aem_tree={"_warnings": ["FAQ fragments have no section "
+                                           "hierarchy ... siteOrigin"]})
+    rows = _read(build_report_zip(BatchResult(filename_top="X", entries=[entry])),
+                 "pages.csv")
+    assert "siteOrigin" in rows[0]["warnings"]
+
+
+def test_batch_clash_column_is_blank_when_nothing_clashed():
+    rows = _read(build_report_zip(BatchResult(filename_top="X", entries=[_entry()])),
+                 "faqs.csv")
+    assert rows[0]["batch_clash"] == ""

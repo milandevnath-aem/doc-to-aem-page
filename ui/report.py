@@ -13,9 +13,9 @@ import io
 import zipfile
 
 _PAGE_COLUMNS = ["doc", "folder", "status", "url", "page_path",
-                 "faq_count", "collisions", "error"]
+                 "faq_count", "collisions", "error", "warnings"]
 _FAQ_COLUMNS = ["page_path", "question", "cf_path", "faq_category",
-                "collision", "answer_chars"]
+                "collision", "batch_clash", "answer_chars"]
 
 
 def _master_properties(cf: dict) -> dict:
@@ -51,6 +51,10 @@ def _page_rows(result) -> list[dict]:
             "faq_count": len(cfs),
             "collisions": sum(1 for c in cfs if c.get("collision") == "yes"),
             "error": entry.error or "",
+            # Non-fatal things the operator still has to know about -- a
+            # mis-filed fragment set, a cross-document path clash. Put on
+            # the tree by the mapper / batch service.
+            "warnings": "; ".join((entry.aem_tree or {}).get("_warnings") or []),
         })
     return rows
 
@@ -60,14 +64,23 @@ def _faq_rows(result) -> list[dict]:
     for entry in result.entries:
         for cf in entry.faq_cfs or []:
             master = _master_properties(cf)
-            categories = master.get("faqCategory") or []
-            answer = master.get("answer") or ""
+            # Property names are config-driven (faq.fieldNames), so read the
+            # names the fragment was actually built with rather than the
+            # defaults -- otherwise a renamed field reports an empty
+            # category and a zero-length answer for a perfectly good fragment.
+            names = cf.get("_field_names") or {}
+            categories = master.get(names.get("category", "faqCategory")) or []
+            answer = master.get(names.get("answer", "answer")) or ""
             rows.append({
                 "page_path": entry.page_path,
                 "question": _title_of(cf),
                 "cf_path": cf.get("path", ""),
                 "faq_category": ",".join(categories),
                 "collision": cf.get("collision", "unknown"),
+                # Set when another document in the same batch derived this
+                # exact CF path; holds the path that was asked for before
+                # this fragment was suffixed to keep both answers.
+                "batch_clash": cf.get("batch_clash", ""),
                 "answer_chars": len(answer),
             })
     return rows

@@ -68,6 +68,14 @@ def build_faq_cf_trees(ncm: dict, cfg: PageTypeConfig, hierarchy: list[str]) -> 
             trees.append({
                 "name": slug,
                 "path": f"{folder}/{slug}",
+                # Which master properties the configured field names landed
+                # in. The batch report needs to read `answer`/`category`
+                # back out and has no config of its own; carrying the names
+                # on the fragment keeps `ui/report.py` a dumb formatter
+                # instead of a second place that hardcodes them. Ignored by
+                # the FileVault serializer like every other top-level key
+                # that isn't name/properties/children.
+                "_field_names": dict(names),
                 "primary_type": "dam:Asset",
                 "properties": {"jcr:mixinTypes": ["mix:referenceable"]},
                 "children": [{

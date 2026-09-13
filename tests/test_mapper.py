@@ -950,3 +950,42 @@ def test_template_overlay_faq_block_with_no_question_falls_back_to_inline_render
     assert len(faq_nodes) == 1
     assert "fragmentPaths" not in faq_nodes[0]["properties"]
     assert faq_nodes[0]["children"][0]["properties"]["text"] == "<p>Orphan answer.</p>"
+
+
+def test_source_url_is_set_even_when_the_doc_has_no_faq_fragments():
+    """The report's `url` column exists to tell "no URL in the doc" apart from
+    everything else. Gating `_source_url` on fragments existing made a doc
+    with a perfectly good URL and no FAQ section report a blank url."""
+    tree = map_ncm_to_node_tree(
+        _ncm(page_props={"title": "T", "url": f"{ORIGIN}/health-insurance/no-faqs"}),
+        _config_with_faq())
+
+    assert "_faq_cfs" not in tree
+    assert tree["_source_url"] == f"{ORIGIN}/health-insurance/no-faqs"
+
+
+def test_fragments_with_no_derivable_hierarchy_carry_a_warning():
+    """URL not on siteOrigin (or siteOrigin unset) -> split_site_url yields
+    nothing, so the fragments land flat under cfRoot with no faqCategory
+    tags. Silent mis-filing otherwise: the tree must say so."""
+    cfg = _config_with_faq()
+    cfg.page_name_strategy = "slug_from_meta_title"   # page still builds
+    cfg.site_origin = ""
+
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq("https://www.somewhere-else.example/health-insurance/x"), cfg)
+
+    assert len(tree["_faq_cfs"]) == 2
+    # flat, untagged -- the condition the warning is about
+    assert tree["_faq_cfs"][0]["path"].rsplit("/", 1)[0] == \
+        "/content/dam/iffcotokio/content-fragments/faq"
+    warnings = tree["_warnings"]
+    assert len(warnings) == 1
+    assert "siteOrigin" in warnings[0]
+    assert "faqCategory" in warnings[0]
+
+
+def test_fragments_with_a_derivable_hierarchy_carry_no_warning():
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), _config_with_faq())
+    assert "_warnings" not in tree

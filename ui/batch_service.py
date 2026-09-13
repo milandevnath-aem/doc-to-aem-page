@@ -68,6 +68,60 @@ def _annotate_collisions(entries: list[BatchEntry], aem_base_url: str | None,
             cf["collision"] = cf_exists(client, aem_base_url, cf["path"], auth_token)
 
 
+def _dedupe_cf_paths(entries: list[BatchEntry]) -> None:
+    """Make Content Fragment paths unique across the whole batch.
+
+    `build_faq_cf_trees` only dedupes within one document, so two docs in
+    the same URL section asking the same question derive the SAME fragment
+    path. The packager keys entries by path, so the second fragment would
+    overwrite the first and one answer would ship missing -- no error, no
+    row, nothing. Suffix the later one exactly like the in-document rule
+    does, and record what it clashed with so the report can show it:
+    silently renaming would trade lost content for an invisible rename.
+    """
+    taken: set[str] = set()
+    for entry in entries:
+        clashes = 0
+        for cf in entry.faq_cfs:
+            path = cf["path"]
+            if path not in taken:
+                taken.add(path)
+                continue
+            n = 2
+            while f"{path}-{n}" in taken:
+                n += 1
+            new_path = f"{path}-{n}"
+            taken.add(new_path)
+            cf["batch_clash"] = path
+            cf["path"] = new_path
+            cf["name"] = new_path.rsplit("/", 1)[-1]
+            # The page's faq reference node (when the AEM component is
+            # configured) holds the OLD path -- rewrite it or the page
+            # would point at a fragment this batch never writes.
+            _rewrite_cf_path(entry.aem_tree, path, new_path)
+            clashes += 1
+        if clashes and entry.aem_tree is not None:
+            entry.aem_tree.setdefault("_warnings", []).append(
+                f"{clashes} FAQ fragment path(s) clashed with another document "
+                "in this batch and were suffixed so no answer is lost -- see "
+                "batch_clash in faqs.csv.")
+
+
+def _rewrite_cf_path(node: dict | None, old: str, new: str) -> None:
+    """Replace `old` with `new` anywhere it appears as a property value in
+    the page tree (the faq component's paths property is a list)."""
+    if not node:
+        return
+    props = node.get("properties") or {}
+    for key, value in props.items():
+        if value == old:
+            props[key] = new
+        elif isinstance(value, list):
+            props[key] = [new if v == old else v for v in value]
+    for child in node.get("children") or []:
+        _rewrite_cf_path(child, old, new)
+
+
 def run_batch(
     files: list[tuple[str, bytes]],
     page_type_config: PageTypeConfig | None = None,
@@ -173,6 +227,7 @@ def run_batch(
                 faq_cfs=page_cfs_out,
             ))
 
+    _dedupe_cf_paths(entries)
     _annotate_collisions(entries, aem_base_url, auth_token)
     return BatchResult(filename_top=top_folder, entries=entries)
 

@@ -81,7 +81,7 @@ def test_home_page_shows_page_and_container_resource_types(tmp_path, monkeypatch
     # falls back to the bundled sample -- values from config/samples/article.pagetypeconfig.json
     assert "iffcotokio/components/page" in text
     assert "iffcotokio/components/parsys" in text
-    assert "slug_from_meta_title" in text
+    assert "slug_from_url" in text
 
 
 def test_save_site_config_preserves_other_page_types(tmp_path, monkeypatch):
@@ -537,6 +537,8 @@ def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, 
     document.add_paragraph().add_run("Cashless vs Reimbursement").bold = True
     document.add_paragraph("Meta Title: Cashless vs Reimbursement Guide")
     document.add_paragraph("Meta Description: A guide.")
+    document.add_paragraph("New Required URL: https://www.iffcotokio.co.in/"
+                           "health-insurance/cashless-vs-reimbursement")
     document.add_paragraph("Meta keywords: kw1, kw2")
     document.add_paragraph("Body content.")
     buf = io.BytesIO()
@@ -554,8 +556,9 @@ def test_result_page_shows_aem_node_tree_when_page_type_config_active(tmp_path, 
     page = client.get(posted.headers["location"])
     text = page.text
     assert "AEM Node Tree" in text
-    # target JCR path = content_root/<slug from meta title>, from the bundled sample
-    assert "/content/iffcotokio/en/cashless-vs-reimbursement-guide" in text
+    # target JCR path = content_root + the URL's own section hierarchy + slug,
+    # from the bundled sample (pageNameStrategy slug_from_url)
+    assert "/content/iffcotokio/en/health-insurance/cashless-vs-reimbursement" in text
     # jcr:content properties visible in the JSON dump
     assert "iffcotokio/components/text" in text  # page-description mapped
     assert "cq:template" in text
@@ -633,11 +636,14 @@ def test_run_batch_route_uploads_multiple_docx_and_redirects(tmp_path, monkeypat
     monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
 
     import docx as docx_lib
-    def make_v3(title):
+    def make_v3(title, slug):
         d = docx_lib.Document()
         d.add_paragraph().add_run(title).bold = True
         d.add_paragraph(f"Meta Title: {title}")
         d.add_paragraph("Meta Description: desc")
+        # the bundled sample runs slug_from_url -- no URL, no page
+        d.add_paragraph("New Required URL: "
+                        f"https://www.iffcotokio.co.in/health-insurance/{slug}")
         d.add_paragraph("Meta keywords: kw")
         d.add_paragraph("Body.")
         buf = io.BytesIO()
@@ -646,9 +652,9 @@ def test_run_batch_route_uploads_multiple_docx_and_redirects(tmp_path, monkeypat
         return buf
 
     files = [
-        ("all_files", ("Articles/Article1/one.docx", make_v3("First"),
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First", "first"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        ("all_files", ("Articles/Article2/two.docx", make_v3("Second"),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second", "second"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     ]
 
@@ -688,11 +694,14 @@ def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
 
     import docx as docx_lib
-    def make_v3(title):
+    def make_v3(title, slug):
         d = docx_lib.Document()
         d.add_paragraph().add_run(title).bold = True
         d.add_paragraph(f"Meta Title: {title}")
         d.add_paragraph("Meta Description: desc")
+        # the bundled sample runs slug_from_url -- no URL, no page
+        d.add_paragraph("New Required URL: "
+                        f"https://www.iffcotokio.co.in/health-insurance/{slug}")
         d.add_paragraph("Meta keywords: kw")
         d.add_paragraph("Body.")
         buf = io.BytesIO()
@@ -701,9 +710,9 @@ def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
         return buf
 
     files = [
-        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article"),
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article", "first-article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article", "second-article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     ]
     client = TestClient(app_module.app)
@@ -721,9 +730,11 @@ def test_download_batch_package_returns_multi_page_zip(tmp_path, monkeypatch):
         names = set(zf.namelist())
         filter_xml = zf.read("META-INF/vault/filter.xml").decode()
 
-    # both pages present at their JCR paths
-    assert any("first-article" in n for n in names)
-    assert any("second-article" in n for n in names)
+    # both pages present at their JCR paths, nested under the URL hierarchy
+    assert ("jcr_root/content/iffcotokio/en/health-insurance/first-article/"
+            ".content.xml") in names
+    assert ("jcr_root/content/iffcotokio/en/health-insurance/second-article/"
+            ".content.xml") in names
     # multi-root filter
     assert filter_xml.count("<filter root=") == 2
 
@@ -738,11 +749,14 @@ def test_batch_report_zip_downloads_both_csvs(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
 
     import docx as docx_lib
-    def make_v3(title):
+    def make_v3(title, slug):
         d = docx_lib.Document()
         d.add_paragraph().add_run(title).bold = True
         d.add_paragraph(f"Meta Title: {title}")
         d.add_paragraph("Meta Description: desc")
+        # the bundled sample runs slug_from_url -- no URL, no page
+        d.add_paragraph("New Required URL: "
+                        f"https://www.iffcotokio.co.in/health-insurance/{slug}")
         d.add_paragraph("Meta keywords: kw")
         d.add_paragraph("Body.")
         buf = io.BytesIO()
@@ -751,9 +765,9 @@ def test_batch_report_zip_downloads_both_csvs(tmp_path, monkeypatch):
         return buf
 
     files = [
-        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article"),
+        ("all_files", ("Articles/Article1/one.docx", make_v3("First Article", "first-article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article"),
+        ("all_files", ("Articles/Article2/two.docx", make_v3("Second Article", "second-article"),
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
     ]
     client = TestClient(app_module.app)

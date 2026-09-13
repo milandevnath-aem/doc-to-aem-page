@@ -6,7 +6,7 @@
   "damRoot": "/content/dam/iffcotokio/articles",
   "pageResourceType": "iffcotokio/components/page",
   "containerResourceType": "iffcotokio/components/parsys",
-  "pageNameStrategy": "slug_from_meta_title",
+  "pageNameStrategy": "slug_from_url",
   "componentMappings": {
     "new-hero-banner": {
       "resourceType": "iffcotokio/components/content/hero-banner-compnent/new-hero-banner",

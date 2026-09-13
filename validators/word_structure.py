@@ -48,6 +48,26 @@ class Issue:
         return f"{head}\n    {self.message}"
 
 
+def _faq_without_questions(blocks: list[dict]) -> list[Issue]:
+    """An FAQ label with no bold question under it opens a `faq` block whose
+    only content is its title, so `empty-component` never fires -- yet no
+    Content Fragment will be generated for it either. The page still builds;
+    the operator just needs to know the questions were not recognised as
+    bold-alone lines."""
+    issues = []
+    for block in blocks:
+        if block["name"] != "faq" or block["items"]:
+            continue
+        label = block["fields"].get("title") or "FAQ"
+        issues.append(Issue(
+            "warning", "faq-without-questions",
+            f"FAQ section '{label}' has no questions -- no bold-alone question "
+            "line followed the label. The page builds with faq_count=0 and no "
+            "Content Fragments.",
+            -1, "", block["name"]))
+    return issues
+
+
 class _ValidatingDslParser(_DslParser):
     def __init__(self):
         super().__init__()
@@ -129,6 +149,8 @@ class _ValidatingDslParser(_DslParser):
                 self.issues.insert(0, Issue("error", "missing-required-metadata",
                     f"Metadata is missing required field(s): {sorted(missing)}.", 0, "[metadata]"))
 
+        self.issues.extend(_faq_without_questions(self.blocks))
+
         for component in self.blocks:
             self._finalize_rte(component["fields"])
             for item in component["items"]:
@@ -160,6 +182,7 @@ class _V3Validator(_V3Parser):
     def finalize(self) -> list[Issue]:
         # trigger the same finalize path so page.properties get "" defaults
         self.to_dict("<validation>", "v3")
+        self.issues.extend(_faq_without_questions(self.blocks))
         props = self.page_properties
         for k in sorted(V3_META_KEYS):
             if not props.get(k):

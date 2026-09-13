@@ -777,3 +777,40 @@ def test_faq_label_with_no_questions_yields_empty_faq_block(tmp_path):
     faqs = [b for b in parse_docx(path)["blocks"] if b["name"] == "faq"]
     assert len(faqs) == 1
     assert faqs[0]["items"] == []
+
+
+def test_validate_docx_warns_when_faq_label_has_no_questions(tmp_path):
+    """Spec's error-handling table: an FAQ label with no bold question under
+    it must warn (the page still builds, faq_count=0). `_start_faq` fills the
+    block's `title`, so `empty-component` is satisfied and never fires -- this
+    is the only signal the operator gets."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: page-description]")
+        doc.add_paragraph("description:")
+        doc.add_paragraph("Body prose.")
+        doc.add_paragraph().add_run("FAQs").bold = True
+        doc.add_paragraph("Plain prose where a bold question should be.")
+
+    issues = validate_docx(_build_docx(tmp_path / "faq-no-questions.docx", build))
+
+    faq_issues = [i for i in issues if i.code == "faq-without-questions"]
+    assert len(faq_issues) == 1
+    assert faq_issues[0].severity == "warning"
+    assert "FAQs" in faq_issues[0].message
+    assert not any(i.severity == "error" for i in issues)   # page still builds
+
+
+def test_validate_docx_does_not_warn_when_faq_has_questions(tmp_path):
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component: page-description]")
+        doc.add_paragraph("description:")
+        doc.add_paragraph("Body prose.")
+        doc.add_paragraph().add_run("FAQs").bold = True
+        doc.add_paragraph().add_run("Is it covered?").bold = True
+        doc.add_paragraph("Yes.")
+
+    issues = validate_docx(_build_docx(tmp_path / "faq-ok.docx", build))
+
+    assert not any(i.code == "faq-without-questions" for i in issues)

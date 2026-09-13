@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AEM Content Automation Framework — Python framework that ingests structured content (Phase 1: Microsoft Word `.docx`) and emits installable AEM Content Packages. No AEM SDK and no custom AEM server code: output is a FileVault `.zip` an operator installs through Package Manager.
 
-Page paths do NOT mirror the source folder tree. The page name comes from the active `pageNameStrategy` (`slug_from_meta_title` | `slug_from_url` | `docx_filename`) and lands directly under the configured `contentRoot`. In batch mode a subfolder groups a `.docx` with its images and never appears in the JCR path.
+Page paths do NOT mirror the source folder tree. The page name comes from the active `pageNameStrategy` (`slug_from_meta_title` | `slug_from_url` | `docx_filename`). Under `slug_from_url` the page lands under `contentRoot` + the section hierarchy stated by the document's own URL; every other strategy lands it flat, directly under `contentRoot`. In batch mode a subfolder groups a `.docx` with its images and never appears in the JCR path.
 
-Example (`slug_from_meta_title`, `contentRoot` `/content/iffcotokio/en/articles`):
+Example (`slug_from_url`, `contentRoot` `/content/iffcotokio/en` — what the bundled sample config does):
 `Articles/Article1/V2-Cashless Treatment vs Reimbursement Claims.docx`
-→ `/content/iffcotokio/en/articles/cashless-treatment-vs-reimbursement-claims`
+carrying `New Required URL: https://www.iffcotokio.co.in/health-insurance/cashless-treatment-vs-reimbursement-claims`
+→ `/content/iffcotokio/en/health-insurance/cashless-treatment-vs-reimbursement-claims`
+
+The same URL hierarchy drives the FAQ Content Fragment folder (`faq.cfRoot` + hierarchy) and the fragments' `faqCategory` tags, so page and fragment placement stay in step. With `siteOrigin` unset or not matching the doc's URL, no hierarchy can be derived — the batch report says so in `pages.csv`'s `warnings` column.
 
 ## Commands
 
