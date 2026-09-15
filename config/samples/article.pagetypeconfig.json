@@ -51,5 +51,8 @@
         "sourceMode": "list"
       }
     }
+  },
+  "componentSlots": {
+    "faq": "root/responsivegrid/right_par/faq"
   }
 }

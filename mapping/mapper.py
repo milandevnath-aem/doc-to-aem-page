@@ -467,10 +467,23 @@ def _build_jcr_content_from_template(
             fallback_parent["children"].append(node)
 
     if faq_cfs and cfg.faq is not None:
-        fallback_parent = _pick_fallback_parent(jcr_content, slots)
-        ref = _build_faq_reference(faq_cfs, cfg, len(fallback_parent["children"]))
+        # Where the FAQ component sits is the template's business, so honour
+        # its configured slot like any other component. Without one, fall back
+        # to the same catch-all the unmapped blocks use -- an operator who has
+        # not configured a slot keeps the component rather than losing it.
+        slot_path = slots.get("faq")
+        if slot_path:
+            slot_parts = slot_path.split("/")
+            parent = _find_or_create_parent(jcr_content, slot_parts[:-1])
+            leaf_name = slot_parts[-1]
+        else:
+            parent = _pick_fallback_parent(jcr_content, slots)
+            leaf_name = None
+        ref = _build_faq_reference(faq_cfs, cfg, len(parent["children"]))
         if ref is not None:
-            fallback_parent["children"].append(ref)
+            if leaf_name:
+                ref["name"] = leaf_name
+            parent["children"].append(ref)
     return jcr_content
 
 

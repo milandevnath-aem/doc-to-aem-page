@@ -1066,3 +1066,74 @@ def test_faq_reference_static_properties_never_override_generated_ones():
            == "iffcotokio/components/content/faq-cf"][0]
     assert faq["properties"]["limit"] == 2
     assert faq["properties"]["fragments"] != ["/nonsense"]
+
+
+def test_faq_reference_lands_in_its_configured_slot_in_overlay_mode():
+    """Placement is the template's business, so it comes from component_slots
+    like every other component -- not from a fallback guess that drops the
+    FAQ next to the breadcrumb."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+    })
+    cfg.template_initial_content = {
+        "name": "jcr:content", "primary_type": "cq:PageContent",
+        "properties": {}, "children": [
+            {"name": "root", "primary_type": "nt:unstructured", "properties": {},
+             "children": [
+                 {"name": "responsivegrid", "primary_type": "nt:unstructured",
+                  "properties": {}, "children": [
+                      {"name": "right_par", "primary_type": "nt:unstructured",
+                       "properties": {}, "children": []},
+                      {"name": "breadcrumb", "primary_type": "nt:unstructured",
+                       "properties": {}, "children": []},
+                  ]},
+             ]},
+        ],
+    }
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+        "faq": "root/responsivegrid/right_par/faq",
+    }
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), cfg)
+
+    grid = tree["children"][0]["children"][0]["children"][0]
+    right_par = [c for c in grid["children"] if c["name"] == "right_par"][0]
+    assert [c["name"] for c in right_par["children"]] == ["page_description", "faq"]
+    assert right_par["children"][1]["properties"]["sling:resourceType"] == (
+        "iffcotokio/components/content/faq-cf")
+    # and nothing was appended beside the breadcrumb
+    assert not any(c["name"].startswith("faq") for c in grid["children"])
+
+
+def test_faq_reference_still_falls_back_when_no_slot_is_configured():
+    """An operator who has not configured a slot keeps today's behaviour
+    rather than losing the component entirely."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+    })
+    cfg.template_initial_content = {
+        "name": "jcr:content", "primary_type": "cq:PageContent",
+        "properties": {}, "children": [
+            {"name": "root", "primary_type": "nt:unstructured", "properties": {},
+             "children": [
+                 {"name": "responsivegrid", "primary_type": "nt:unstructured",
+                  "properties": {}, "children": [
+                      {"name": "right_par", "primary_type": "nt:unstructured",
+                       "properties": {}, "children": []},
+                  ]},
+             ]},
+        ],
+    }
+    cfg.component_slots = {
+        "page-description": "root/responsivegrid/right_par/page_description",
+    }
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), cfg)
+    grid = tree["children"][0]["children"][0]["children"][0]
+    right_par = [c for c in grid["children"] if c["name"] == "right_par"][0]
+    assert any(c["properties"].get("sling:resourceType")
+               == "iffcotokio/components/content/faq-cf"
+               for c in right_par["children"])

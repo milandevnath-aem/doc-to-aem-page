@@ -31,7 +31,8 @@
   },
   "componentSlots": {
     "new-hero-banner": "root/responsivegrid/new_hero_banner",
-    "page-description": "root/responsivegrid/right_par/page_description"
+    "page-description": "root/responsivegrid/right_par/page_description",
+    "faq": "root/responsivegrid/right_par/faq"
   },
   "faq": {
     "cfRoot": "/content/dam/iffcotokio/content-fragments/faq",
