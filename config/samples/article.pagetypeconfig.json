@@ -53,6 +53,6 @@
     }
   },
   "componentSlots": {
-    "faq": "root/responsivegrid/right_par/faq"
+    "faq": "root/responsivegrid/right_par/faq_cf"
   }
 }
