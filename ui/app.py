@@ -87,6 +87,27 @@ def _current_page_type_config(page_type: str):
         return None, "none"
 
 
+def _package_stamp(created_at: str | None) -> str:
+    """Compact UTC stamp for a package name, e.g. "20260916-040733".
+
+    Taken from the RUN's timestamp rather than download time, so downloading
+    the same run twice still yields a byte-identical package -- the stamp
+    reaches properties.xml, which AEM's Package Manager lists, and a value
+    that moved on every download would defeat that guarantee.
+
+    Returns "" for a missing or unparseable value: a record written by an
+    older build must still be downloadable. The stamp is a convenience, not
+    content.
+    """
+    if not created_at:
+        return ""
+    try:
+        moment = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return ""
+    return moment.astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
 @app.get("/")
 def home(request: Request):
     site = load_site_config(SITE_CONFIG_PATH)
@@ -265,8 +286,9 @@ def download_batch_package(run_id: str):
     if not trees:
         raise HTTPException(status_code=400,
                             detail="No successful pages in this batch to package.")
+    stamp = _package_stamp(record.created_at)
     meta = PackageMeta(
-        name=(record.filename_top or "batch") + "-batch",
+        name=(record.filename_top or "batch") + "-batch" + (f"-{stamp}" if stamp else ""),
         description=f"Batch package: {len(trees)} pages from {record.filename_top or 'folder'}",
     )
     data = build_batch_package(trees, meta)
@@ -299,8 +321,10 @@ def download_package(run_id: str):
     if record.aem_tree is None:
         raise HTTPException(status_code=400,
                             detail="No AEM node tree on this run; set a page-type config and re-run.")
+    stamp = _package_stamp(record.created_at)
+    base = Path(record.filename).stem.lower().replace(" ", "-") or "content-package"
     meta = PackageMeta(
-        name=Path(record.filename).stem.lower().replace(" ", "-") or "content-package",
+        name=base + (f"-{stamp}" if stamp else ""),
         description=f"Generated from {record.filename}",
     )
     data = build_package(record.aem_tree, meta)

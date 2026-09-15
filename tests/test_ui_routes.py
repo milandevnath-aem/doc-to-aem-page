@@ -1,6 +1,8 @@
 """Tests for ui/app.py routes."""
 
 import io
+import re
+import zipfile
 
 from fastapi.testclient import TestClient
 
@@ -865,3 +867,73 @@ def test_home_page_shows_when_the_cached_config_was_fetched(tmp_path, monkeypatc
 
     text = TestClient(app_module.app).get("/").text
     assert "fetched 20" in text and "UTC" in text
+
+
+def _seed_batch_run_for_download(tmp_path, monkeypatch) -> str:
+    """POST a two-doc folder batch and return its run id. Cache dir is
+    isolated so the operator's real gitignored config cannot make these
+    brittle -- the pipeline falls back to the bundled sample."""
+    import docx as docx_lib
+
+    monkeypatch.setattr(app_module, "UPLOADS_DIR", tmp_path)
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+
+    def make(title, slug):
+        d = docx_lib.Document()
+        d.add_paragraph().add_run(title).bold = True
+        d.add_paragraph(f"Meta Title: {title}")
+        d.add_paragraph("Meta Description: desc")
+        d.add_paragraph("New Required URL: "
+                        f"https://www.iffcotokio.co.in/health-insurance/{slug}")
+        d.add_paragraph("Body.")
+        buf = io.BytesIO()
+        d.save(buf)
+        buf.seek(0)
+        return buf
+
+    ct = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    files = [
+        ("all_files", ("Articles/A1/one.docx", make("First Article", "first"), ct)),
+        ("all_files", ("Articles/A2/two.docx", make("Second Article", "second"), ct)),
+    ]
+    resp = TestClient(app_module.app).post(
+        "/run-batch", files=files, follow_redirects=False)
+    return resp.headers["location"].rsplit("/", 1)[-1]
+
+
+
+# ---------- package names carry the run's timestamp ----------
+
+def test_package_stamp_is_compact_utc_derived_from_the_run():
+    """Derived from the run's own created_at, not download time, so
+    re-downloading a run still yields a byte-identical package."""
+    from ui.app import _package_stamp
+    assert _package_stamp("2026-09-16T04:07:33.583693+00:00") == "20260916-040733"
+    # a record written by an older build, or a malformed value, must not
+    # take the download route down -- the stamp is a convenience, not data
+    assert _package_stamp("") == ""
+    assert _package_stamp("not-a-date") == ""
+    assert _package_stamp(None) == ""
+
+
+def test_batch_package_filename_ends_with_the_run_timestamp(tmp_path, monkeypatch):
+    run_id = _seed_batch_run_for_download(tmp_path, monkeypatch)
+    response = TestClient(app_module.app).get(f"/batch-runs/{run_id}/package.zip")
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    name = re.search(r'filename="([^"]+)\.zip"', disposition).group(1)
+    assert re.search(r"-\d{8}-\d{6}$", name), name
+
+
+def test_batch_package_manifest_name_matches_the_download_filename(tmp_path, monkeypatch):
+    """AEM's Package Manager lists properties.xml's name, so the stamp has to
+    reach it too -- otherwise every install overwrites the previous entry."""
+    run_id = _seed_batch_run_for_download(tmp_path, monkeypatch)
+    response = TestClient(app_module.app).get(f"/batch-runs/{run_id}/package.zip")
+    name = re.search(r'filename="([^"]+)\.zip"',
+                     response.headers["content-disposition"]).group(1)
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        props = zf.read("META-INF/vault/properties.xml").decode()
+    assert f'<entry key="name">{name}</entry>' in props
