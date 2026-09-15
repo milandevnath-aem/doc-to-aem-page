@@ -284,6 +284,11 @@ def _build_faq_reference(faq_cfs: list[dict], cfg: PageTypeConfig, index: int) -
     count_property = (component.get("countProperty") or "").strip()
     if count_property:
         properties[count_property] = len(faq_cfs)
+    # Fixed AEM-side values the component needs but the document cannot
+    # supply -- e.g. which source mode it should read. setdefault so a stray
+    # config entry can never clobber the fragment list or the derived count.
+    for key, value in (component.get("staticProperties") or {}).items():
+        properties.setdefault(key, value)
     return {
         "name": f"faq_{index}",
         "primary_type": "nt:unstructured",

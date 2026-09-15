@@ -1025,3 +1025,44 @@ def test_faq_reference_omits_the_count_when_no_countProperty_configured():
            == "iffcotokio/components/content/faq-cf"][0]
     assert "maxQuestions" not in faq["properties"]
     assert len(faq["properties"]) == 2   # resourceType + fragments only
+
+
+def test_faq_reference_merges_static_properties_from_config():
+    """The AEM component's sourceMode ("list" vs "folder") is an AEM-side
+    value, so it comes from config like every other one -- the mapper must
+    not learn what modes the component has. Same staticProperties idiom the
+    componentMappings entries already use."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+        "countProperty": "limit",
+        "staticProperties": {"sourceMode": "list"},
+    })
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), cfg)
+    root = tree["children"][0]["children"][0]
+    faq = [c for c in root["children"]
+           if c["properties"].get("sling:resourceType")
+           == "iffcotokio/components/content/faq-cf"][0]
+    assert faq["properties"]["sourceMode"] == "list"
+    assert faq["properties"]["limit"] == 2
+    assert len(faq["properties"]["fragments"]) == 2
+
+
+def test_faq_reference_static_properties_never_override_generated_ones():
+    """A stray staticProperties entry must not be able to clobber the
+    fragment list or the derived count."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+        "countProperty": "limit",
+        "staticProperties": {"fragments": ["/nonsense"], "limit": 99},
+    })
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), cfg)
+    root = tree["children"][0]["children"][0]
+    faq = [c for c in root["children"]
+           if c["properties"].get("sling:resourceType")
+           == "iffcotokio/components/content/faq-cf"][0]
+    assert faq["properties"]["limit"] == 2
+    assert faq["properties"]["fragments"] != ["/nonsense"]
