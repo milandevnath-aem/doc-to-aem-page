@@ -273,13 +273,21 @@ def _build_faq_reference(faq_cfs: list[dict], cfg: PageTypeConfig, index: int) -
     paths_property = (component.get("pathsProperty") or "").strip()
     if not resource_type or not paths_property:
         return None
+    properties = {
+        "sling:resourceType": resource_type,
+        paths_property: [c["path"] for c in faq_cfs],
+    }
+    # The component caps how many questions it renders. Derive the cap from
+    # what this document actually carried, so a page with more FAQs than some
+    # fixed default cannot silently drop the tail. Optional: a component with
+    # no cap must not gain a property whose name we guessed.
+    count_property = (component.get("countProperty") or "").strip()
+    if count_property:
+        properties[count_property] = len(faq_cfs)
     return {
         "name": f"faq_{index}",
         "primary_type": "nt:unstructured",
-        "properties": {
-            "sling:resourceType": resource_type,
-            paths_property: [c["path"] for c in faq_cfs],
-        },
+        "properties": properties,
         "children": [],
     }
 

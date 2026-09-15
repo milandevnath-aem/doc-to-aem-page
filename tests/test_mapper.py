@@ -989,3 +989,39 @@ def test_fragments_with_a_derivable_hierarchy_carry_no_warning():
     tree = map_ncm_to_node_tree(
         _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), _config_with_faq())
     assert "_warnings" not in tree
+
+
+def test_faq_reference_carries_the_doc_s_own_question_count():
+    """The component caps how many questions it renders. Left at a fixed
+    default, a page with more FAQs than the cap silently drops the tail --
+    so the count is derived per page from what the document actually had."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+        "countProperty": "maxQuestions",
+    })
+    ncm = _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys")
+    tree = map_ncm_to_node_tree(ncm, cfg)
+    root = tree["children"][0]["children"][0]
+    faq = [c for c in root["children"]
+           if c["properties"].get("sling:resourceType")
+           == "iffcotokio/components/content/faq-cf"][0]
+    assert len(faq["properties"]["fragments"]) == 2
+    assert faq["properties"]["maxQuestions"] == 2
+
+
+def test_faq_reference_omits_the_count_when_no_countProperty_configured():
+    """countProperty is optional -- a component with no cap must not gain a
+    stray property whose name we guessed."""
+    cfg = _config_with_faq(page_component={
+        "resourceType": "iffcotokio/components/content/faq-cf",
+        "pathsProperty": "fragments",
+    })
+    tree = map_ncm_to_node_tree(
+        _ncm_with_faq(f"{ORIGIN}/health-insurance/family/who-buys"), cfg)
+    root = tree["children"][0]["children"][0]
+    faq = [c for c in root["children"]
+           if c["properties"].get("sling:resourceType")
+           == "iffcotokio/components/content/faq-cf"][0]
+    assert "maxQuestions" not in faq["properties"]
+    assert len(faq["properties"]) == 2   # resourceType + fragments only
