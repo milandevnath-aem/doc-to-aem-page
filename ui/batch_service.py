@@ -153,7 +153,7 @@ def run_batch(
     top_folder = _pick_top_folder(files)
     docx_files, assets_by_folder = _partition_files_by_folder(files)
     entries: list[BatchEntry] = []
-    seen_slugs: set[str] = set()
+    seen_paths: set[str] = set()
 
     with tempfile.TemporaryDirectory() as tmp:
         for rel_path, blob in docx_files:
@@ -202,18 +202,24 @@ def run_batch(
                 ))
                 continue
 
-            if slug and slug in seen_slugs:
+            # Key on the FULL page path, never on the last segment alone.
+            # Two pages legitimately share a final segment under different
+            # hierarchies -- /health-insurance/x and /hindi/health-insurance/x
+            # are distinct pages. Keying on the segment dropped every
+            # translated page from a batch that also carried its
+            # source-language counterpart.
+            if page_path and page_path in seen_paths:
                 entries.append(BatchEntry(
                     folder=folder, filename=filename, page_path=page_path,
                     status="collision",
                     issues=result.issues,
-                    error=(f"Duplicate page slug '{slug}' -- first docx wins; "
-                           "this one skipped so no silent overwrite."),
+                    error=(f"Duplicate page path '{page_path}' -- first docx "
+                           "wins; this one skipped so no silent overwrite."),
                 ))
                 continue
 
-            if slug:
-                seen_slugs.add(slug)
+            if page_path:
+                seen_paths.add(page_path)
             # Pull assets off the tree BEFORE storing -- bytes are not
             # JSON-serializable, and the packager reads them from the
             # entry (not the tree) so keeping them here is cleaner

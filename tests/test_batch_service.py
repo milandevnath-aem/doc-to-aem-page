@@ -770,3 +770,57 @@ def test_page_refs_survive_a_rename_that_collides_with_a_real_sibling_slug(tmp_p
     assert len(refs) == len(set(refs)) == 2
     assert set(refs) <= shipped
     assert {cf["path"] for cf in second.faq_cfs} <= set(refs)
+
+
+# ---- collision key: full page path, not the last segment ----
+
+def _url_docs(tmp_path, specs: list[tuple[str, str, str]]):
+    """specs is (folder, title, url). Returns the run_batch files list."""
+    for folder, title, url in specs:
+        (tmp_path / folder).mkdir(parents=True, exist_ok=True)
+        _write_v3_doc_with_url(tmp_path / folder / "d.docx", title, url)
+    return [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+            for f in sorted(tmp_path.rglob("*.docx"))]
+
+
+def test_batch_same_last_segment_under_different_hierarchies_is_not_a_collision(tmp_path):
+    """Two pages whose URLs differ only by a language prefix resolve to
+    genuinely different JCR paths. Keying the duplicate check on the last
+    path segment alone flagged the second as a collision and dropped it
+    from the package -- which silently removed every Hindi page from a
+    batch that also carried its English counterpart."""
+    files = _url_docs(tmp_path, [
+        ("en", "Cashless Claim",
+         "https://www.iffcotokio.co.in/health-insurance/cashless-treatment"),
+        ("hi", "Cashless Claim Hindi",
+         "https://www.iffcotokio.co.in/hindi/health-insurance/cashless-treatment"),
+    ])
+
+    result = run_batch(files, page_type_config=_slug_from_url_config())
+
+    assert [e.status for e in result.entries] == ["passed", "passed"]
+    assert sorted(e.page_path for e in result.entries) == [
+        "/content/site/articles/health-insurance/cashless-treatment",
+        "/content/site/articles/hindi/health-insurance/cashless-treatment",
+    ]
+    # both survive into the package
+    assert all(e.aem_tree is not None for e in result.entries)
+
+
+def test_batch_identical_page_paths_still_collide(tmp_path):
+    """The duplicate guard must still fire when two documents resolve to
+    the SAME full path -- widening the key must not disable the check."""
+    files = _url_docs(tmp_path, [
+        ("a", "Cashless Claim",
+         "https://www.iffcotokio.co.in/health-insurance/cashless-treatment"),
+        ("b", "Cashless Claim Again",
+         "https://www.iffcotokio.co.in/health-insurance/cashless-treatment"),
+    ])
+
+    result = run_batch(files, page_type_config=_slug_from_url_config())
+
+    assert [e.status for e in result.entries] == ["passed", "collision"]
+    assert result.entries[1].aem_tree is None
+    # the message names the full path, so the operator can find both docs
+    assert "/content/site/articles/health-insurance/cashless-treatment" \
+        in result.entries[1].error
