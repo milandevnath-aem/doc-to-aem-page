@@ -35,9 +35,12 @@
             </small>
         </p>
         <p>
-            <label for="article_cf_path">Article Content Fragment path</label><br>
-            <input type="text" id="article_cf_path" name="article_cf_path"
-                   value="{{ site.cf_paths.get('article', '') }}" size="60">
+            <label for="cf_path">Content Fragment path for
+                <code>{{ site.active_page_type }}</code></label><br>
+            <input type="text" id="cf_path" name="cf_path"
+                   value="{{ site.cf_paths.get(site.active_page_type, '') }}" size="60">
+            <br><small>Saved against the active page type above. Each page type
+            keeps its own path, so switching types does not overwrite another's.</small>
         </p>
         <button type="submit">Save site config</button>
     </form>

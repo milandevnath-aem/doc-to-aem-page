@@ -87,8 +87,8 @@ def test_home_page_shows_page_and_container_resource_types(tmp_path, monkeypatch
 
 
 def test_save_site_config_preserves_other_page_types(tmp_path, monkeypatch):
-    """Saving the form only touches the article CF path -- an already-saved
-    blog/category entry must survive the round trip."""
+    """Saving the form only touches the ACTIVE page type's CF path -- an
+    already-saved blog/category entry must survive the round trip."""
     cache_dir = tmp_path / "cache"
     monkeypatch.setattr(app_module, "AEM_CONFIG_DIR", cache_dir)
     site_path = cache_dir / "site.json"
@@ -113,7 +113,7 @@ def test_save_site_config_preserves_other_page_types(tmp_path, monkeypatch):
             "aem_base_url": "http://localhost:4502",
             "active_page_type": "article",
             "auth_token_env": "AEM_AUTH_TOKEN",
-            "article_cf_path": "/content/dam/x/article-new",
+            "cf_path": "/content/dam/x/article-new",
         },
         follow_redirects=False,
     )
@@ -137,7 +137,7 @@ def test_home_page_reflects_saved_site_config(tmp_path, monkeypatch):
             "aem_base_url": "http://custom-aem:4503",
             "active_page_type": "article",
             "auth_token_env": "AEM_TOKEN_STAGE",
-            "article_cf_path": "/content/dam/x/article",
+            "cf_path": "/content/dam/x/article",
         },
         follow_redirects=False,
     )
@@ -937,3 +937,55 @@ def test_batch_package_manifest_name_matches_the_download_filename(tmp_path, mon
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
         props = zf.read("META-INF/vault/properties.xml").decode()
     assert f'<entry key="name">{name}</entry>' in props
+
+
+# ---------- the CF path belongs to the ACTIVE page type ----------
+
+def test_save_site_stores_cf_path_under_the_active_page_type(tmp_path, monkeypatch):
+    """The form field was hardcoded to the "article" key, so switching the
+    active page type saved its CF path under `article` -- the new type then
+    had no path at all ("No CF path configured for 'city-page-config'"), and
+    the real article path was silently overwritten."""
+    from aem_client.config import SiteConfig, load_site_config, save_site_config
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+    save_site_config(
+        SiteConfig(cf_paths={"article": "/content/dam/x/article-page-config"}),
+        cache_dir / "site.json",
+    )
+
+    TestClient(app_module.app).post("/config/site", data={
+        "aem_base_url": "http://localhost:5402",
+        "active_page_type": "city-page-config",
+        "auth_token_env": "AEM_AUTH_TOKEN",
+        "cf_path": "/content/dam/x/city-page-config",
+    }, follow_redirects=False)
+
+    saved = load_site_config(cache_dir / "site.json")
+    assert saved.cf_paths["city-page-config"] == "/content/dam/x/city-page-config"
+    # the other page type's path survives rather than being clobbered
+    assert saved.cf_paths["article"] == "/content/dam/x/article-page-config"
+
+
+def test_save_site_clearing_the_path_only_drops_the_active_page_type(tmp_path, monkeypatch):
+    from aem_client.config import SiteConfig, load_site_config, save_site_config
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(app_module, "SITE_CONFIG_PATH", cache_dir / "site.json")
+    save_site_config(
+        SiteConfig(cf_paths={"article": "/content/dam/x/article",
+                             "city-page-config": "/content/dam/x/city"}),
+        cache_dir / "site.json",
+    )
+
+    TestClient(app_module.app).post("/config/site", data={
+        "aem_base_url": "http://localhost:5402",
+        "active_page_type": "city-page-config",
+        "auth_token_env": "AEM_AUTH_TOKEN",
+        "cf_path": "",
+    }, follow_redirects=False)
+
+    saved = load_site_config(cache_dir / "site.json")
+    assert "city-page-config" not in saved.cf_paths
+    assert saved.cf_paths["article"] == "/content/dam/x/article"
