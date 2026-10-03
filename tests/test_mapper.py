@@ -1137,3 +1137,27 @@ def test_faq_reference_still_falls_back_when_no_slot_is_configured():
     assert any(c["properties"].get("sling:resourceType")
                == "iffcotokio/components/content/faq-cf"
                for c in right_par["children"])
+
+
+def test_tree_carries_dam_root_so_the_packager_can_type_asset_folders():
+    """The packager writes sling:Folder descriptors for the DAM folders
+    above an asset, and needs to know where the operator's DAM tree starts
+    to avoid redefining /content/dam itself."""
+    cfg = _url_config()
+    cfg.dam_root = "/content/dam/iffcotokio/articles"
+    ncm = _ncm(page_props={"title": "T", "url": f"{ORIGIN}/health-insurance/p"},
+               blocks=[{"name": "new-hero-banner", "variant": None,
+                        "fields": {"imageFile": "car-insurance.jpg"},
+                        "items": [], "table": None}])
+    tree = map_ncm_to_node_tree(
+        ncm, cfg, page_assets={"car-insurance.jpg": b"\x89PNG\r\n"})
+    assert tree["_assets"][0]["dam_path"].startswith(
+        "/content/dam/iffcotokio/articles/")
+    assert tree["_dam_root"] == "/content/dam/iffcotokio/articles"
+
+
+def test_no_dam_root_key_when_no_assets_resolved():
+    tree = map_ncm_to_node_tree(
+        _ncm(page_props={"title": "T", "url": f"{ORIGIN}/health-insurance/p"}),
+        _url_config())
+    assert "_dam_root" not in tree

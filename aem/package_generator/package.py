@@ -78,15 +78,30 @@ _SLING_FOLDER_XML = (
 )
 
 
-def _cf_folder_entries(cf_root: str, cf_path: str) -> dict[str, str]:
-    """A sling:Folder descriptor for every hierarchy level between the CF root
-    and the fragment, so an install into a fresh tree creates real folders
-    rather than leaving FileVault to guess a node type."""
-    relative = cf_path[len(cf_root):].strip("/")
-    segments = relative.split("/")[:-1]   # drop the fragment itself
-    entries: dict[str, str] = {}
-    current = cf_root.rstrip("/")
-    for segment in segments:
+def _folder_entries(root: str, leaf_path: str) -> dict[str, str]:
+    """A sling:Folder descriptor for every level between `root` and the leaf.
+
+    Without these, FileVault creates the missing parents itself and types them
+    `nt:folder`. AEM's own convention under /content/dam is `sling:Folder`, and
+    a DAM folder carrying the wrong primary type behaves differently in the
+    Assets UI -- so the package has to state the type rather than leave it to
+    a default.
+
+    `root` itself IS included: with the flat asset layout the asset sits
+    directly under damRoot, so the root is the only folder the install has to
+    create, and excluding it was the whole defect. Everything ABOVE root is
+    left alone -- shipping descriptors for /content/dam would put this package
+    in the business of redefining the site's DAM tree.
+
+    The leaf is excluded, since it carries its own node definition (a
+    dam:Asset, or a Content Fragment).
+    """
+    if not root or not leaf_path.startswith(root.rstrip("/") + "/"):
+        return {}
+    root = root.rstrip("/")
+    entries = {f"jcr_root{root}/.content.xml": _SLING_FOLDER_XML}
+    current = root
+    for segment in leaf_path[len(root):].strip("/").split("/")[:-1]:
         current = f"{current}/{segment}"
         entries[f"jcr_root{current}/.content.xml"] = _SLING_FOLDER_XML
     return entries
@@ -120,12 +135,17 @@ def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
         # `_assets` sitting on the dict does NOT leak into the XML.
         assets = tree.get("_assets") if isinstance(tree, dict) else None
         entries[f"jcr_root{tree['path']}/.content.xml"] = node_to_content_xml(tree)
+        # `_dam_root` is the configured damRoot, carried on the tree the same
+        # way `_faq_cf_root` is, so the packager never has to reverse-engineer
+        # where the operator's DAM tree starts from an asset path.
+        dam_root = tree.get("_dam_root") or ""
         if assets:
             for asset in assets:
                 dam_path = asset["dam_path"]
                 all_asset_paths.append(dam_path)
                 entries[f"jcr_root{dam_path}/.content.xml"] = _dam_asset_xml(asset["filename"])
                 entries[f"jcr_root{dam_path}/_jcr_content/renditions/original"] = asset["bytes"]
+                entries.update(_folder_entries(dam_root, dam_path))
 
         cf_root = tree.get("_faq_cf_root") or ""
         for cf in (tree.get("_faq_cfs") or []):
@@ -133,7 +153,7 @@ def build_batch_package(trees: list[dict], meta: PackageMeta) -> bytes:
             all_cf_paths.append(cf_path)
             entries[f"jcr_root{cf_path}/.content.xml"] = node_to_content_xml(cf)
             if cf_root:
-                entries.update(_cf_folder_entries(cf_root, cf_path))
+                entries.update(_folder_entries(cf_root, cf_path))
 
     # Filter roots emit in a stable order so the built package stays
     # byte-identical for identical inputs.

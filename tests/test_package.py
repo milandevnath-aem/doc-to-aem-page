@@ -376,3 +376,79 @@ def test_single_page_build_package_is_byte_identical_across_builds_with_cfs():
             "_faq_cfs": [_cf_tree("/content/dam/x/faq/a/q", "q")]}
     meta = PackageMeta(name="b")
     assert build_package(tree, meta) == build_package(tree, meta)
+
+
+# ---------- DAM asset folders are sling:Folder, not nt:folder ----------
+
+def test_batch_package_writes_sling_folder_for_dam_asset_ancestors():
+    """Assets shipped only their dam:Asset node, leaving FileVault to create
+    the parent DAM folders itself -- which it does as nt:folder. AEM's DAM
+    convention is sling:Folder, and a folder created with the wrong primary
+    type behaves differently in the Assets UI."""
+    from aem.package_generator.package import build_batch_package
+    tree = {
+        "name": "p", "path": "/content/iffcotokio/en/health-insurance/p",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_dam_root": "/content/dam/iffcotokio",
+        "_assets": [{
+            "dam_path": "/content/dam/iffcotokio/articles/car-insurance.jpg",
+            "filename": "car-insurance.jpg",
+            "bytes": b"\x89PNG\r\n",
+        }],
+    }
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        xml = zf.read(
+            "jcr_root/content/dam/iffcotokio/articles/.content.xml").decode()
+        assert 'jcr:primaryType="sling:Folder"' in xml
+        # the asset itself is still a dam:Asset, not a folder
+        asset = zf.read(
+            "jcr_root/content/dam/iffcotokio/articles/"
+            "car-insurance.jpg/.content.xml").decode()
+        assert 'jcr:primaryType="dam:Asset"' in asset
+
+
+def test_dam_folder_entries_stop_at_the_configured_root():
+    """The DAM root itself and everything above it already exist in AEM.
+    Shipping descriptors for them would put this package in the business of
+    redefining /content/dam."""
+    from aem.package_generator.package import build_batch_package
+    tree = {
+        "name": "p", "path": "/content/iffcotokio/en/p",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_dam_root": "/content/dam/iffcotokio",
+        "_assets": [{
+            "dam_path": "/content/dam/iffcotokio/city/delhi/hero.jpg",
+            "filename": "hero.jpg", "bytes": b"x",
+        }],
+    }
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        names = zf.namelist()
+    # the configured root itself IS described -- with a flat asset layout it
+    # is the only folder an install has to create
+    assert "jcr_root/content/dam/iffcotokio/.content.xml" in names
+    assert "jcr_root/content/dam/iffcotokio/city/.content.xml" in names
+    assert "jcr_root/content/dam/iffcotokio/city/delhi/.content.xml" in names
+    # but nothing above it
+    assert "jcr_root/content/dam/.content.xml" not in names
+    assert "jcr_root/content/.content.xml" not in names
+
+
+def test_asset_renditions_node_stays_nt_folder():
+    """Inside a dam:Asset, `renditions` is nt:folder -- that is AEM's own
+    shape, confirmed against the client's reference fragment package. Only
+    the DAM folders ABOVE the asset become sling:Folder."""
+    from aem.package_generator.package import build_batch_package
+    tree = {
+        "name": "p", "path": "/content/iffcotokio/en/p",
+        "primary_type": "cq:Page", "properties": {}, "children": [],
+        "_dam_root": "/content/dam/iffcotokio",
+        "_assets": [{"dam_path": "/content/dam/iffcotokio/articles/a.jpg",
+                     "filename": "a.jpg", "bytes": b"x"}],
+    }
+    data = build_batch_package([tree], PackageMeta(name="b"))
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        asset = zf.read(
+            "jcr_root/content/dam/iffcotokio/articles/a.jpg/.content.xml").decode()
+    assert '<renditions jcr:primaryType="nt:folder">' in asset

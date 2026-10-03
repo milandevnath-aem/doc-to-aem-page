@@ -87,6 +87,11 @@ def map_ncm_to_node_tree(
         # kept on the page node so batch-mode iterates assets per-page
         # in the same shape it iterates the multi-root filter.
         tree["_assets"] = resolved_assets
+        # The packager types the DAM folders above each asset as
+        # sling:Folder, AEM's own convention; left to FileVault they would
+        # be created nt:folder. It needs the configured root to know where
+        # to stop, rather than inferring it from an asset path.
+        tree["_dam_root"] = cfg.dam_root
     # `_source_url` feeds the batch report's `url` column, so it is set
     # whenever the doc HAS a url -- a doc with a perfectly good URL and no
     # FAQ section must not report a blank url, which is the one thing that
