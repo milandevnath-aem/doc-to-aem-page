@@ -80,6 +80,10 @@ def _is_site_url(value: str, origin: str | None) -> bool:
 # `Image: foo.jpg` as a real field. Extend to more components when a second
 # one asks for the same pattern.
 BANNER_IMAGE_RE = re.compile(r"^banner\s+image:\s*(\S.+?\.(?:png|jpe?g|svg|gif|webp))\s*$", re.I)
+# The same marker with no filename. City docs carry the bare label and
+# source the image from the batch's spreadsheet row instead; without this
+# the label falls through and becomes the hero's implicit title.
+BANNER_IMAGE_BARE_RE = re.compile(r"^banner\s+image\s*:\s*$", re.I)
 _BANNER_IMAGE_COMPONENTS = {"new-hero-banner"}
 
 # Bold-only paragraph text that reliably marks the FAQ section in real
@@ -213,6 +217,10 @@ class _DslParser:
         self._assets_dir = Path(assets_dir) if assets_dir else None
         self._image_count = 0
         self._site_origin = site_origin
+        # A meta label seen with no inline value, waiting for the next line
+        # to supply it. City docs soft-break between `Meta Title:` and its
+        # value, so the label and the value arrive as separate lines.
+        self._pending_meta_key: str | None = None
 
     def _target_fields(self) -> dict:
         return self._item["fields"] if self._item is not None else self._component["fields"]
@@ -325,6 +333,12 @@ class _DslParser:
                 # the first prose paragraph as an implicit `title` (a title
                 # the mapper wouldn't use anyway -- it takes bannerTitle
                 # from the doc's Meta Title).
+                self._active_field = "description"
+                return
+            if BANNER_IMAGE_BARE_RE.match(text):
+                # Bare label, no filename: consume it and open the
+                # description exactly as the filled form does, leaving
+                # imageFile unset so the mapper keeps the template default.
                 self._active_field = "description"
                 return
         if self._active_field is None:
@@ -455,8 +469,12 @@ class _DslParser:
         # after it is question/answer pairs, not article prose: each further
         # bold-only line is a question, and the plain paragraphs and bullets
         # under it are that question's answer.
+        # A Word Heading style marks the label and its questions just as
+        # reliably as bold does: article docs bold them, city docs style
+        # the label Heading 1 and every question Heading 3.
+        is_faq_marker = _paragraph_all_bold(paragraph) or style_name.startswith("Heading")
         if (
-            _paragraph_all_bold(paragraph)
+            is_faq_marker
             and self._component is not None
             and self._item is None
             and _FAQ_LABEL_RE.match(paragraph.text.strip())
@@ -464,7 +482,7 @@ class _DslParser:
             self._start_faq(paragraph.text.strip())
             return
         if self._component is not None and self._component["name"] == "faq":
-            if _paragraph_all_bold(paragraph) and paragraph.text.strip():
+            if is_faq_marker and paragraph.text.strip():
                 self._start_faq_item(paragraph.text.strip())
                 return
         is_bullet = _has_numbering(paragraph)
@@ -514,27 +532,56 @@ class _DslParser:
         per-line handling. First-wins, so a repeated key cannot stomp the
         value the author wrote first."""
         if self._component is not None:
+            self._pending_meta_key = None
             return False
         m = _ANY_KEY_RE.match(line)
+        if self._pending_meta_key:
+            key, self._pending_meta_key = self._pending_meta_key, None
+            # Only a real meta label on THIS line supersedes the pending
+            # one -- anything else is the pending key's value, arriving
+            # after a soft line break.
+            if not (m and self._meta_key_for(m.group(1).strip(), m.group(2).strip())):
+                self._store_meta(key, line.strip())
+                return True
         if not m:
             return False
         label, value = m.group(1).strip(), m.group(2).strip()
-        low = label.lower()
-        if "url" in low:
-            if not _is_site_url(value, self._site_origin):
-                return False
-            key = "old_url" if "old" in low else "url"
-        elif "keyword" in low:
-            key = "keywords"
-        elif _META_TITLE_RE.match(label):
-            key = "title"
-        elif _META_DESC_RE.match(label):
-            key = "description"
-        else:
+        key = self._meta_key_for(label, value)
+        if key is None:
             return False
         if value:
-            self.page_properties.setdefault(key, value)
+            self._store_meta(key, value)
+        else:
+            self._pending_meta_key = key
         return True
+
+    def _meta_key_for(self, label: str, value: str) -> str | None:
+        """Map a key-line label to a page-property name, or None when the
+        label is not page metadata. `value` gates only the URL keys: a
+        "...url..." label is ours when its value is on this site, and an
+        empty value defers that check to the line that supplies it."""
+        low = label.lower()
+        if "url" in low:
+            if value and not _is_site_url(value, self._site_origin):
+                return None
+            return "old_url" if "old" in low else "url"
+        if "keyword" in low:
+            return "keywords"
+        if _META_TITLE_RE.match(label):
+            return "title"
+        if _META_DESC_RE.match(label):
+            return "description"
+        return None
+
+    def _store_meta(self, key: str, value: str) -> None:
+        """First-wins, so a repeated key cannot stomp the value the author
+        wrote first. A URL is re-checked here because a soft-broken one
+        reaches this point without having passed `_meta_key_for`."""
+        if not value:
+            return
+        if key in ("url", "old_url") and not _is_site_url(value, self._site_origin):
+            return
+        self.page_properties.setdefault(key, value)
 
     def _finalize_rte(self, fields: dict):
         # Serialize any accumulated RTE blocks (description, body, ...) and

@@ -814,3 +814,93 @@ def test_validate_docx_does_not_warn_when_faq_has_questions(tmp_path):
     issues = validate_docx(_build_docx(tmp_path / "faq-ok.docx", build))
 
     assert not any(i.code == "faq-without-questions" for i in issues)
+
+
+# ---- city-page authoring (v2 client docs) ----
+
+ORIGIN = "https://www.iffcotokio.co.in"
+
+
+def test_meta_value_on_the_line_below_its_label_is_captured(tmp_path):
+    """City docs put a meta label and its value on either side of a soft
+    line break:
+
+        Meta Title:
+        Health Insurance in New Delhi | IFFCO-TOKIO
+
+    The label line matched with an empty value, so nothing was stored and
+    the value line -- arriving before any component -- was dropped. The
+    page then shipped with no jcr:title and no jcr:description."""
+    def build(doc):
+        doc.add_paragraph("Health Insurance in New Delhi", style="Heading 1")
+        doc.add_paragraph(f"New Required URL: {ORIGIN}/health-insurance/city/new-delhi")
+        _add_soft_broken(doc, "Meta Title:", "Health Insurance in New Delhi | IFFCO-TOKIO")
+        _add_soft_broken(doc, "Meta Description:", "Know what to check about coverage.")
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner prose.")
+
+    path = _build_docx(tmp_path / "city-meta.docx", build)
+    props = parse_docx(path, site_origin=ORIGIN)["page"]["properties"]
+
+    assert props["title"] == "Health Insurance in New Delhi | IFFCO-TOKIO"
+    assert props["description"] == "Know what to check about coverage."
+    assert props["url"] == f"{ORIGIN}/health-insurance/city/new-delhi"
+
+
+def test_bare_banner_image_label_does_not_become_the_hero_title(tmp_path):
+    """v2 city docs carry `Banner Image:` with no filename -- the image
+    comes from elsewhere. The bare label must be consumed, not promoted to
+    the hero's implicit title."""
+    def build(doc):
+        _add_metadata(doc)
+        _add_soft_broken(
+            doc,
+            "[component:new-hero-banner]",
+            "Banner Image:",
+            "",
+            "A medical emergency can bring an unexpected expense.",
+        )
+
+    path = _build_docx(tmp_path / "bare-banner.docx", build)
+    hero = parse_docx(path)["blocks"][0]
+
+    assert hero["name"] == "new-hero-banner"
+    assert hero["fields"].get("title", "") != "Banner Image:"
+    assert "imageFile" not in hero["fields"]
+    assert "medical emergency" in hero["fields"].get("htmltext", "")
+    assert "Banner Image" not in hero["fields"].get("htmltext", "")
+
+
+def test_heading_styled_faq_label_and_questions_build_a_faq_block(tmp_path):
+    """v2 city docs style the FAQ label as Heading 1 and each question as
+    Heading 3 -- neither is bold. FAQ detection required bold, so the whole
+    Q&A section folded into page-description and no Content Fragments were
+    generated for it."""
+    def build(doc):
+        _add_metadata(doc)
+        doc.add_paragraph("[component:new-hero-banner]")
+        doc.add_paragraph("Banner prose.")
+        doc.add_paragraph("Conclusion", style="Heading 1")
+        doc.add_paragraph("Closing body copy.")
+        doc.add_paragraph("FAQs", style="Heading 1")
+        doc.add_paragraph("Is health insurance useful here?", style="Heading 3")
+        doc.add_paragraph("It can help manage eligible medical expenses.")
+        doc.add_paragraph("Can I buy online?", style="Heading 3")
+        doc.add_paragraph("Yes, depending on the product.")
+
+    path = _build_docx(tmp_path / "city-faq.docx", build)
+    blocks = parse_docx(path)["blocks"]
+    names = [b["name"] for b in blocks]
+
+    assert "faq" in names, names
+    faq = next(b for b in blocks if b["name"] == "faq")
+    assert [i["fields"]["question"] for i in faq["items"]] == [
+        "Is health insurance useful here?",
+        "Can I buy online?",
+    ]
+    assert "eligible medical expenses" in faq["items"][0]["fields"].get("htmltext", "")
+
+    # and the Q&A must NOT also sit in the article body
+    body = " ".join(b["fields"].get("htmltext", "") for b in blocks
+                    if b["name"] == "page-description")
+    assert "Is health insurance useful here?" not in body
