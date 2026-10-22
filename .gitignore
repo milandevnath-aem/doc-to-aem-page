@@ -18,3 +18,9 @@ ui/static/assets/
 config/cache/
 .claude/worktrees/
 .superpowers/
+
+# editor-local settings
+.vscode/
+
+# stray npm artefact; this project has no package.json
+package-lock.json
