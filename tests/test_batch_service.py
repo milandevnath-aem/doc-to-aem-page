@@ -824,3 +824,23 @@ def test_batch_identical_page_paths_still_collide(tmp_path):
     # the message names the full path, so the operator can find both docs
     assert "/content/site/articles/health-insurance/cashless-treatment" \
         in result.entries[1].error
+
+
+def test_batch_without_a_page_type_config_reports_unmapped_not_passed(tmp_path):
+    """With no resolvable PageTypeConfig the pipeline produces no node
+    tree, so the page cannot reach the package. It used to be recorded as
+    `passed` with a blank path and no error, so the operator saw a green
+    batch and silently got an empty package. It must say what happened."""
+    (tmp_path / "A1").mkdir()
+    _write_v3_doc(tmp_path / "A1" / "d.docx", "Some Page")
+    files = [(str(f.relative_to(tmp_path)).replace("\\", "/"), f.read_bytes())
+             for f in tmp_path.rglob("*.docx")]
+
+    result = run_batch(files, page_type_config=None)
+
+    entry = result.entries[0]
+    assert entry.status == "unmapped"
+    assert entry.aem_tree is None
+    assert "config" in (entry.error or "").lower()
+    # the row still names the file so the operator can see what was read
+    assert entry.filename == "d.docx"

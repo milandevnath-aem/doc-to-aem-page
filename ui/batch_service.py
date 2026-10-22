@@ -25,7 +25,7 @@ class BatchEntry:
     folder: str          # first path segment of the relative path
     filename: str        # docx basename
     page_path: str       # computed JCR path, or "" on failure
-    status: str          # passed | failed | collision | unresolved
+    status: str          # passed | failed | collision | unresolved | unmapped
     issues: list[dict] = field(default_factory=list)
     aem_tree: dict | None = None
     # Phase 2B: per-page assets resolved from the folder's non-docx
@@ -186,7 +186,24 @@ def run_batch(
                 ))
                 continue
 
-            page_path = (result.aem_tree or {}).get("path", "")
+            # The document parsed, but no node tree came back -- which
+            # only happens when no PageTypeConfig resolved, because the
+            # mapper is the sole producer of the tree. Without one the
+            # page cannot reach the package, so say so instead of
+            # reporting `passed` and quietly shipping a short zip.
+            if result.aem_tree is None:
+                entries.append(BatchEntry(
+                    folder=folder, filename=filename, page_path="",
+                    status="unmapped",
+                    issues=result.issues,
+                    error=("No page-type config resolved for this batch, so "
+                           "no AEM nodes could be built. The active page "
+                           "type has neither a cached fetch nor a bundled "
+                           "sample -- fetch it from AEM, then re-run."),
+                ))
+                continue
+
+            page_path = result.aem_tree.get("path", "")
             slug = page_path.rsplit("/", 1)[-1] if page_path else ""
 
             # Unresolved slug -- the doc has no URL / meta title / other

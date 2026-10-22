@@ -11,13 +11,25 @@
 {% set failed = run.entries | selectattr('status', 'equalto', 'failed') | list %}
 {% set collided = run.entries | selectattr('status', 'equalto', 'collision') | list %}
 {% set unresolved = run.entries | selectattr('status', 'equalto', 'unresolved') | list %}
+{% set unmapped = run.entries | selectattr('status', 'equalto', 'unmapped') | list %}
 <p>
     <strong>{{ passed | length }}</strong> passed
     &middot; <strong>{{ failed | length }}</strong> failed
     &middot; <strong>{{ collided | length }}</strong> collision(s)
     &middot; <strong>{{ unresolved | length }}</strong> unresolved
+    &middot; <strong>{{ unmapped | length }}</strong> unmapped
     &middot; <strong>{{ run.entries | length }}</strong> total
 </p>
+
+{% if unmapped %}
+<p class="batch-blocker">
+    <strong>No page-type config resolved.</strong>
+    Every document parsed, but none could be mapped to AEM nodes, so the
+    package would be empty. Set the active page type on the
+    <a href="/">home page</a> and fetch its config from AEM, then run the
+    batch again.
+</p>
+{% endif %}
 
 {% if passed %}
 <p>
