@@ -1,0 +1,73 @@
+{
+  "_source": "uat.iffcotokio.co.in, /content/iffcotokio/en/.../jcr:content/root/responsivegrid/new_hero_banner.json, read 2026-10-17 via an authenticated browser session",
+  "/content/iffcotokio/en/health-insurance/cashless-treatment-vs-reimbursement-claims": {
+    "bannerTitle": "Cashless vs Reimbursement Health Insurance Claims",
+    "bannerDescription": "Understand the difference between cashless and reimbursement health insurance claims, how each process works, and when you can use them.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/banner/cashless-treatment-vs-reimbursement-claims.png",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/family-health-insurance-vs-individual-health-insurance": {
+    "bannerTitle": "Family Health Insurance Vs Individual Health Insurance",
+    "bannerDescription": "When buying health insurance, you may wonder whether to choose one plan for the whole family or separate plans for each member. This article explains both options in simple terms to help you make an informed choice.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/family-vs-individual.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/how-much-sum-insured-a-family-have-in-india": {
+    "bannerTitle": "How to Choose the Right Sum Insured for Family Health Insurance in India",
+    "bannerDescription": "A sum insured that works for one family may not be enough for another. This article explains the key factors to consider when deciding how much health insurance cover your family may need.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/how-much-sum-insured.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/what-is-medical-insurance-claim-procedure-and-how-does-it-work": {
+    "bannerTitle": "How Does a Medical Insurance Claim Work?",
+    "bannerDescription": "Knowing the health insurance claim process in advance can help you act quickly during a medical emergency. This article explains the key steps involved in filing and settling a medical claim.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/mediclaim-process-work.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/family-health-insurance/who-should-buy-family-health-insurance": {
+    "bannerTitle": "Who Should Buy Family Health Insurance?",
+    "bannerDescription": "Choosing health insurance for a family depends on the number of members, their ages and healthcare needs.Understand who can consider a family floater plan and what to check before buying one.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/who-should-buy-fhp.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/family-health-insurance/why-buy-family-health-insurance-online": {
+    "bannerTitle": "Why Buy Online family health insurance",
+    "bannerDescription": "From comparing coverage to checking policy details, buying health insurance online can save time and make the process simpler. Know what to look for before choosing a family health insurance plan.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/why-buy-online.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  },
+  "/content/iffcotokio/en/health-insurance/family-health-insurance/why-family-health-insurance-is-important-in-india": {
+    "bannerTitle": "Why Family Health Insurance Is Important in India",
+    "bannerDescription": "Every family has different healthcare needs, and medical expenses can arise without warning. This article explains the key reasons to consider family health insurance and the factors that can make it useful for Indian families.",
+    "bannerDate": "24 September, 2026",
+    "bannerReadTime": "3 min",
+    "imagePath": "/content/dam/iffcotokio/iffco-images/importance-fhp.jpg",
+    "imageAlt": "health-insurance",
+    "cardAlign": "left",
+    "textIsRich": "true"
+  }
+}
