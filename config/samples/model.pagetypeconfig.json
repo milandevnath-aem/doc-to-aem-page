@@ -1,0 +1,57 @@
+{
+  "type": "model",
+  "templatePath": "/conf/iffcotokio/settings/wcm/templates/Iffco-tokio-new-model-template-2026",
+  "contentRoot": "/content/iffcotokio/en",
+  "damRoot": "/content/dam/iffcotokio/car/model",
+  "siteOrigin": "https://www.iffcotokio.co.in",
+  "pageNameStrategy": "slug_from_url",
+  "pageResourceType": "iffcotokio/components/structure/page",
+  "containerResourceType": "wcm/foundation/components/responsivegrid",
+  "enableSubBaseImageSorting": true,
+  "componentMappings": {
+    "new-hero-banner": {
+      "resourceType": "iffcotokio/components/content/hero-banner-compnent/new-hero-banner",
+      "fieldRenames": {
+        "title": "bannerTitle",
+        "htmltext": "bannerDescription"
+      },
+      "staticProperties": {
+        "cardAlign": "left"
+      }
+    },
+    "page-description": {
+      "resourceType": "iffcotokio/components/content/page-description",
+      "fieldRenames": {
+        "htmltext": "description"
+      },
+      "staticProperties": {
+        "textIsRich": "true",
+        "enableContainer": "true"
+      }
+    }
+  },
+  "componentSlots": {
+    "new-hero-banner": "root/responsivegrid/new_hero_banner",
+    "page-description": "root/responsivegrid/right_par/page_description",
+    "faq": "root/responsivegrid/right_par/faq_cf"
+  },
+  "faq": {
+    "cfRoot": "/content/dam/iffcotokio/content-fragments/faq",
+    "cfModel": "/conf/iffcotokio/settings/dam/cfm/models/faq-template",
+    "tagNamespace": "iffcotokio",
+    "fieldNames": {
+      "question": "question",
+      "answer": "answer",
+      "answerHTML": "answerHTML",
+      "category": "faqCategory"
+    },
+    "pageComponent": {
+      "resourceType": "iffcotokio/components/content/faq-cf",
+      "pathsProperty": "fragments",
+      "countProperty": "limit",
+      "staticProperties": {
+        "sourceMode": "list"
+      }
+    }
+  }
+}
